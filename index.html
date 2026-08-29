@@ -1,5 +1,26 @@
-import React, { useState, useEffect, useRef, useCallback, useMemo } from "react";
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1, user-scalable=no" />
+<title>うれペタ｜手売り・対面販売のための在庫＆売上管理</title>
+<meta name="description" content="対面販売・ハンドメイド出店向けの在庫・売上管理アプリ。シールを貼る感覚で在庫を記録し、おつり計算やCSV出力もその場でできます。" />
+<link rel="icon" href="data:," />
 
+<!-- React (UMD) -->
+<script src="https://unpkg.com/react@18/umd/react.production.min.js" crossorigin></script>
+<script src="https://unpkg.com/react-dom@18/umd/react-dom.production.min.js" crossorigin></script>
+<!-- Babel Standalone（ブラウザ上でJSXをその場で変換） -->
+<script src="https://unpkg.com/@babel/standalone/babel.min.js" crossorigin></script>
+
+<style>
+  html, body { margin: 0; padding: 0; background: #F2E8D6; }
+</style>
+</head>
+<body>
+<div id="root"></div>
+
+<script type="text/babel" data-presets="react">
 /* =========================================================================
    在庫・売上管理アプリ（対面販売・ハンドメイド出店向け）
    - イベント（出店・マルシェ等）ごとにプロジェクトを作成
@@ -9,7 +30,9 @@ import React, { useState, useEffect, useRef, useCallback, useMemo } from "react"
    - 色覚特性に配慮し、色だけでなく「形」「模様」でも識別可能
    ========================================================================= */
 
-const STORAGE_KEY = "doujin-sales-tracker:data";
+const { useState, useEffect, useRef, useCallback, useMemo } = React;
+
+const STORAGE_KEY = "urepeta:data";
 
 const SHAPES = [
   { id: "circle", label: "丸" },
@@ -164,7 +187,7 @@ function Seal({ shape, color, pattern, filled, size = 34, dim = false }) {
 
 /* ------------------------------- App ------------------------------------ */
 
-export default function App() {
+function App() {
   const [events, setEvents] = useState([]);
   const [loaded, setLoaded] = useState(false);
   const [view, setView] = useState("events"); // 'events' | 'event' | 'product'
@@ -178,41 +201,31 @@ export default function App() {
 
   const saveTimer = useRef(null);
 
-  // ---- load ----
+  // ---- load (localStorage) ----
   useEffect(() => {
-    let cancelled = false;
-    (async () => {
-      try {
-        const res = await window.storage.get(STORAGE_KEY, false);
-        if (!cancelled && res && res.value) {
-          const parsed = JSON.parse(res.value);
-          if (parsed && Array.isArray(parsed.events)) setEvents(parsed.events);
-          if (parsed && parsed.settings && typeof parsed.settings.vibrationEnabled === "boolean") {
-            setVibrationEnabled(parsed.settings.vibrationEnabled);
-          }
+    try {
+      const raw = localStorage.getItem(STORAGE_KEY);
+      if (raw) {
+        const parsed = JSON.parse(raw);
+        if (parsed && Array.isArray(parsed.events)) setEvents(parsed.events);
+        if (parsed && parsed.settings && typeof parsed.settings.vibrationEnabled === "boolean") {
+          setVibrationEnabled(parsed.settings.vibrationEnabled);
         }
-      } catch (e) {
-        // no saved data yet — start fresh
-      } finally {
-        if (!cancelled) setLoaded(true);
       }
-    })();
-    return () => {
-      cancelled = true;
-    };
+    } catch (e) {
+      // no saved data yet, or corrupted — start fresh
+    } finally {
+      setLoaded(true);
+    }
   }, []);
 
-  // ---- debounced save ----
+  // ---- debounced save (localStorage) ----
   useEffect(() => {
     if (!loaded) return;
     if (saveTimer.current) clearTimeout(saveTimer.current);
-    saveTimer.current = setTimeout(async () => {
+    saveTimer.current = setTimeout(() => {
       try {
-        await window.storage.set(
-          STORAGE_KEY,
-          JSON.stringify({ events, settings: { vibrationEnabled } }),
-          false
-        );
+        localStorage.setItem(STORAGE_KEY, JSON.stringify({ events, settings: { vibrationEnabled } }));
       } catch (e) {
         console.error("save failed", e);
       }
@@ -1408,3 +1421,12 @@ function GlobalStyle() {
     `}</style>
   );
 }
+
+
+/* ------------------------------- Mount ----------------------------------- */
+const root = ReactDOM.createRoot(document.getElementById("root"));
+root.render(<App />);
+
+</script>
+</body>
+</html>
