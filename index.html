@@ -1,0 +1,1410 @@
+import React, { useState, useEffect, useRef, useCallback, useMemo } from "react";
+
+/* =========================================================================
+   在庫・売上管理アプリ（対面販売・ハンドメイド出店向け）
+   - イベント（出店・マルシェ等）ごとにプロジェクトを作成
+   - 商品ごとにマス目（グリッド）で在庫・販売数を「シール」感覚で記録
+   - おつり計算機能
+   - 集計（イベント別・商品別）
+   - 色覚特性に配慮し、色だけでなく「形」「模様」でも識別可能
+   ========================================================================= */
+
+const STORAGE_KEY = "doujin-sales-tracker:data";
+
+const SHAPES = [
+  { id: "circle", label: "丸" },
+  { id: "square", label: "四角" },
+  { id: "triangle", label: "三角" },
+  { id: "star", label: "星" },
+];
+
+const PATTERNS = [
+  { id: "solid", label: "べた塗り" },
+  { id: "diagonal", label: "斜線" },
+  { id: "dot", label: "ドット" },
+  { id: "grid", label: "格子" },
+];
+
+// Okabe–Ito colorblind-safe palette
+const COLORS = [
+  { id: "orange", hex: "#E69F00", label: "オレンジ" },
+  { id: "skyblue", hex: "#56B4E9", label: "スカイブルー" },
+  { id: "green", hex: "#009E73", label: "グリーン" },
+  { id: "blue", hex: "#0072B2", label: "ブルー" },
+  { id: "vermillion", hex: "#D55E00", label: "バーミリオン" },
+  { id: "purple", hex: "#CC79A7", label: "パープル" },
+  { id: "yellow", hex: "#C8A400", label: "イエロー" },
+  { id: "black", hex: "#3A3A3A", label: "ブラック" },
+];
+
+function uid(prefix = "id") {
+  return `${prefix}_${Date.now().toString(36)}_${Math.random().toString(36).slice(2, 8)}`;
+}
+
+function yen(n) {
+  const v = Number.isFinite(n) ? n : 0;
+  return `¥${v.toLocaleString("ja-JP")}`;
+}
+
+function makeCells(count) {
+  return new Array(Math.max(0, count)).fill(false);
+}
+
+function makeTimes(count) {
+  return new Array(Math.max(0, count)).fill(null);
+}
+
+function nowTimeStr() {
+  const d = new Date();
+  const pad = (n) => String(n).padStart(2, "0");
+  return `${pad(d.getHours())}:${pad(d.getMinutes())}:${pad(d.getSeconds())}`;
+}
+
+function csvEscape(value) {
+  const str = String(value ?? "");
+  if (/[",\n]/.test(str)) {
+    return `"${str.replace(/"/g, '""')}"`;
+  }
+  return str;
+}
+
+function downloadCsv(filename, rows) {
+  const csvBody = rows.map((row) => row.map(csvEscape).join(",")).join("\r\n");
+  const csvContent = "\uFEFF" + csvBody; // BOM for Excel(日本語)対応
+  const blob = new Blob([csvContent], { type: "text/csv;charset=utf-8;" });
+  const url = URL.createObjectURL(blob);
+  const link = document.createElement("a");
+  link.href = url;
+  link.download = filename;
+  document.body.appendChild(link);
+  link.click();
+  document.body.removeChild(link);
+  setTimeout(() => URL.revokeObjectURL(url), 1000);
+}
+
+function defaultProduct(overrides = {}) {
+  const usedColorIdx = overrides._colorIdx ?? 0;
+  const stock = overrides.stock ?? 30;
+  return {
+    id: uid("prod"),
+    name: "",
+    price: 500,
+    stock,
+    cells: makeCells(stock),
+    cellTimes: makeTimes(stock),
+    shape: SHAPES[usedColorIdx % SHAPES.length].id,
+    color: COLORS[usedColorIdx % COLORS.length].hex,
+    pattern: PATTERNS[0].id,
+    ...overrides,
+  };
+}
+
+function defaultEvent(overrides = {}) {
+  return {
+    id: uid("evt"),
+    name: "",
+    date: "",
+    venue: "",
+    products: [],
+    ...overrides,
+  };
+}
+
+/* ---------------------------- Seal (SVG) -------------------------------- */
+
+function Seal({ shape, color, pattern, filled, size = 34, dim = false }) {
+  const patId = `pat_${shape}_${pattern}_${color.replace("#", "")}`;
+  const strokeColor = filled ? color : "#7A6340";
+  const fillValue = filled ? (pattern === "solid" ? color : `url(#${patId})`) : "none";
+
+  const shapeProps = {
+    fill: fillValue,
+    stroke: strokeColor,
+    strokeWidth: filled ? 2 : 2,
+    strokeDasharray: filled ? "none" : "3.2 3.2",
+    opacity: dim ? 0.45 : 1,
+  };
+
+  let shapeEl = null;
+  if (shape === "circle") {
+    shapeEl = <circle cx="20" cy="20" r="16" {...shapeProps} />;
+  } else if (shape === "square") {
+    shapeEl = <rect x="5" y="5" width="30" height="30" rx="6" {...shapeProps} />;
+  } else if (shape === "triangle") {
+    shapeEl = <polygon points="20,4 36,33 4,33" strokeLinejoin="round" {...shapeProps} />;
+  } else {
+    shapeEl = (
+      <polygon
+        points="20,3 23.6,14.6 36,14.6 26.1,21.9 29.7,33.6 20,26.2 10.3,33.6 13.9,21.9 4,14.6 16.4,14.6"
+        strokeLinejoin="round"
+        {...shapeProps}
+      />
+    );
+  }
+
+  return (
+    <svg width={size} height={size} viewBox="0 0 40 40" style={{ overflow: "visible" }}>
+      <defs>
+        <pattern id={patId} width="7" height="7" patternUnits="userSpaceOnUse" patternTransform="rotate(45)">
+          <rect width="7" height="7" fill="#FBF5E9" />
+          {pattern === "diagonal" && <rect x="0" y="0" width="3" height="7" fill={color} />}
+          {pattern === "dot" && <circle cx="3.5" cy="3.5" r="2" fill={color} />}
+          {pattern === "grid" && (
+            <>
+              <rect x="0" y="0" width="7" height="2" fill={color} />
+              <rect x="0" y="0" width="2" height="7" fill={color} />
+            </>
+          )}
+        </pattern>
+      </defs>
+      {shapeEl}
+    </svg>
+  );
+}
+
+/* ------------------------------- App ------------------------------------ */
+
+export default function App() {
+  const [events, setEvents] = useState([]);
+  const [loaded, setLoaded] = useState(false);
+  const [view, setView] = useState("events"); // 'events' | 'event' | 'product'
+  const [currentEventId, setCurrentEventId] = useState(null);
+  const [currentProductId, setCurrentProductId] = useState(null);
+
+  const [showAddEvent, setShowAddEvent] = useState(false);
+  const [showAddProduct, setShowAddProduct] = useState(false);
+  const [confirmDialog, setConfirmDialog] = useState(null); // {message, onConfirm}
+  const [vibrationEnabled, setVibrationEnabled] = useState(true);
+
+  const saveTimer = useRef(null);
+
+  // ---- load ----
+  useEffect(() => {
+    let cancelled = false;
+    (async () => {
+      try {
+        const res = await window.storage.get(STORAGE_KEY, false);
+        if (!cancelled && res && res.value) {
+          const parsed = JSON.parse(res.value);
+          if (parsed && Array.isArray(parsed.events)) setEvents(parsed.events);
+          if (parsed && parsed.settings && typeof parsed.settings.vibrationEnabled === "boolean") {
+            setVibrationEnabled(parsed.settings.vibrationEnabled);
+          }
+        }
+      } catch (e) {
+        // no saved data yet — start fresh
+      } finally {
+        if (!cancelled) setLoaded(true);
+      }
+    })();
+    return () => {
+      cancelled = true;
+    };
+  }, []);
+
+  // ---- debounced save ----
+  useEffect(() => {
+    if (!loaded) return;
+    if (saveTimer.current) clearTimeout(saveTimer.current);
+    saveTimer.current = setTimeout(async () => {
+      try {
+        await window.storage.set(
+          STORAGE_KEY,
+          JSON.stringify({ events, settings: { vibrationEnabled } }),
+          false
+        );
+      } catch (e) {
+        console.error("save failed", e);
+      }
+    }, 400);
+    return () => clearTimeout(saveTimer.current);
+  }, [events, vibrationEnabled, loaded]);
+
+  function doVibrate() {
+    if (!vibrationEnabled) return;
+    try {
+      if (navigator && typeof navigator.vibrate === "function") {
+        navigator.vibrate(30);
+      }
+    } catch (e) {
+      // vibration not supported — ignore
+    }
+  }
+
+  const currentEvent = useMemo(
+    () => events.find((e) => e.id === currentEventId) || null,
+    [events, currentEventId]
+  );
+  const currentProduct = useMemo(
+    () => (currentEvent ? currentEvent.products.find((p) => p.id === currentProductId) : null) || null,
+    [currentEvent, currentProductId]
+  );
+
+  const updateEvent = useCallback((eventId, updater) => {
+    setEvents((prev) => prev.map((e) => (e.id === eventId ? updater(e) : e)));
+  }, []);
+
+  const updateProduct = useCallback(
+    (eventId, productId, updater) => {
+      updateEvent(eventId, (e) => ({
+        ...e,
+        products: e.products.map((p) => (p.id === productId ? updater(p) : p)),
+      }));
+    },
+    [updateEvent]
+  );
+
+  function goEvents() {
+    setView("events");
+    setCurrentEventId(null);
+    setCurrentProductId(null);
+  }
+  function openEvent(id) {
+    setCurrentEventId(id);
+    setView("event");
+    setCurrentProductId(null);
+  }
+  function openProduct(id) {
+    setCurrentProductId(id);
+    setView("product");
+  }
+  function backFromProduct() {
+    setView("event");
+    setCurrentProductId(null);
+  }
+
+  function addEvent(data) {
+    const ev = defaultEvent(data);
+    setEvents((prev) => [ev, ...prev]);
+    setShowAddEvent(false);
+    openEvent(ev.id);
+  }
+
+  function addProduct(data) {
+    const idx = currentEvent ? currentEvent.products.length : 0;
+    const prod = defaultProduct({ ...data, _colorIdx: idx });
+    updateEvent(currentEvent.id, (e) => ({ ...e, products: [...e.products, prod] }));
+    setShowAddProduct(false);
+  }
+
+  function deleteEvent(id) {
+    setConfirmDialog({
+      title: "イベントを削除",
+      message: "このイベントと、登録されている商品・記録がすべて削除されます。よろしいですか？",
+      danger: true,
+      onConfirm: () => {
+        setEvents((prev) => prev.filter((e) => e.id !== id));
+        if (currentEventId === id) goEvents();
+        setConfirmDialog(null);
+      },
+    });
+  }
+
+  function deleteProduct(eventId, productId) {
+    setConfirmDialog({
+      title: "商品を削除",
+      message: "この商品の在庫・販売記録が削除されます。よろしいですか？",
+      danger: true,
+      onConfirm: () => {
+        updateEvent(eventId, (e) => ({ ...e, products: e.products.filter((p) => p.id !== productId) }));
+        setConfirmDialog(null);
+        if (currentProductId === productId) backFromProduct();
+      },
+    });
+  }
+
+  function resetProductSales(eventId, productId) {
+    setConfirmDialog({
+      title: "販売記録をリセット",
+      message: "この商品のシール（販売記録）をすべて未販売の状態に戻します。よろしいですか？",
+      danger: true,
+      onConfirm: () => {
+        updateProduct(eventId, productId, (p) => ({ ...p, cells: makeCells(p.stock), cellTimes: makeTimes(p.stock) }));
+        setConfirmDialog(null);
+      },
+    });
+  }
+
+  function toggleCell(eventId, productId, index) {
+    let becameSold = false;
+    updateProduct(eventId, productId, (p) => {
+      const cells = p.cells.slice();
+      const cellTimes = (p.cellTimes && p.cellTimes.length === p.cells.length
+        ? p.cellTimes
+        : makeTimes(p.cells.length)
+      ).slice();
+      const newValue = !cells[index];
+      cells[index] = newValue;
+      cellTimes[index] = newValue ? nowTimeStr() : null;
+      becameSold = newValue;
+      return { ...p, cells, cellTimes };
+    });
+    if (becameSold) doVibrate();
+  }
+
+  function sellQty(eventId, productId, qty) {
+    let anySold = false;
+    updateProduct(eventId, productId, (p) => {
+      const cells = p.cells.slice();
+      const cellTimes = (p.cellTimes && p.cellTimes.length === p.cells.length
+        ? p.cellTimes
+        : makeTimes(p.cells.length)
+      ).slice();
+      let remaining = qty;
+      const time = nowTimeStr();
+      for (let i = 0; i < cells.length && remaining > 0; i++) {
+        if (!cells[i]) {
+          cells[i] = true;
+          cellTimes[i] = time;
+          remaining--;
+          anySold = true;
+        }
+      }
+      return { ...p, cells, cellTimes };
+    });
+    if (anySold) doVibrate();
+  }
+
+  function addStock(eventId, productId, amount) {
+    updateProduct(eventId, productId, (p) => ({
+      ...p,
+      stock: p.stock + amount,
+      cells: [...p.cells, ...makeCells(amount)],
+      cellTimes: [...(p.cellTimes || makeTimes(p.cells.length)), ...makeTimes(amount)],
+    }));
+  }
+
+  return (
+    <div className="app-root">
+      <GlobalStyle />
+      <Header
+        view={view}
+        eventName={currentEvent?.name}
+        productName={currentProduct?.name}
+        onBackToEvents={goEvents}
+        onBackToEvent={backFromProduct}
+        vibrationEnabled={vibrationEnabled}
+        onToggleVibration={() => setVibrationEnabled((v) => !v)}
+      />
+
+      <main className="main">
+        {view === "events" && (
+          <EventsListView
+            events={events}
+            onOpen={openEvent}
+            onAdd={() => setShowAddEvent(true)}
+            onDelete={deleteEvent}
+          />
+        )}
+
+        {view === "event" && currentEvent && (
+          <EventDetailView
+            event={currentEvent}
+            onOpenProduct={openProduct}
+            onAddProduct={() => setShowAddProduct(true)}
+            onDeleteProduct={(pid) => deleteProduct(currentEvent.id, pid)}
+          />
+        )}
+
+        {view === "product" && currentEvent && currentProduct && (
+          <ProductDetailView
+            event={currentEvent}
+            product={currentProduct}
+            onToggleCell={(idx) => toggleCell(currentEvent.id, currentProduct.id, idx)}
+            onSell={(qty) => sellQty(currentEvent.id, currentProduct.id, qty)}
+            onAddStock={(amt) => addStock(currentEvent.id, currentProduct.id, amt)}
+            onReset={() => resetProductSales(currentEvent.id, currentProduct.id)}
+            onDelete={() => deleteProduct(currentEvent.id, currentProduct.id)}
+          />
+        )}
+      </main>
+
+      {showAddEvent && (
+        <AddEventModal onCancel={() => setShowAddEvent(false)} onSubmit={addEvent} />
+      )}
+      {showAddProduct && currentEvent && (
+        <AddProductModal onCancel={() => setShowAddProduct(false)} onSubmit={addProduct} />
+      )}
+      {confirmDialog && (
+        <ConfirmModal
+          {...confirmDialog}
+          onCancel={() => setConfirmDialog(null)}
+        />
+      )}
+    </div>
+  );
+}
+
+/* ------------------------------- Header ---------------------------------- */
+
+function Header({ view, eventName, productName, onBackToEvents, onBackToEvent, vibrationEnabled, onToggleVibration }) {
+  let title = "うれペタ";
+  let subtitle = "うれたらペタッとうれしいアプリ";
+  let onBack = null;
+
+  if (view === "event") {
+    title = eventName || "無題のイベント";
+    subtitle = "イベント詳細・集計";
+    onBack = onBackToEvents;
+  } else if (view === "product") {
+    title = productName || "無題の商品";
+    subtitle = "在庫マス目・おつり計算";
+    onBack = onBackToEvent;
+  }
+
+  return (
+    <header className="header">
+      <div className="header-row">
+        {onBack ? (
+          <button className="icon-btn" onClick={onBack} aria-label="戻る">
+            <svg width="22" height="22" viewBox="0 0 24 24" fill="none">
+              <path d="M15 5l-7 7 7 7" stroke="currentColor" strokeWidth="2.4" strokeLinecap="round" strokeLinejoin="round" />
+            </svg>
+          </button>
+        ) : (
+          <div className="header-mark">
+            <Seal shape="star" color="#C8A400" pattern="solid" filled size={26} />
+          </div>
+        )}
+        <div className="header-text">
+          <h1>{title}</h1>
+          <p>{subtitle}</p>
+        </div>
+        <button
+          className={`vibrate-toggle ${vibrationEnabled ? "vibrate-on" : "vibrate-off"}`}
+          onClick={onToggleVibration}
+          aria-pressed={vibrationEnabled}
+          aria-label={`タップ時の振動を${vibrationEnabled ? "オフ" : "オン"}にする`}
+          title={`振動 ${vibrationEnabled ? "ON" : "OFF"}`}
+        >
+          <VibrateIcon />
+          <span className="vibrate-toggle-label">振動{vibrationEnabled ? "ON" : "OFF"}</span>
+        </button>
+      </div>
+    </header>
+  );
+}
+
+function VibrateIcon() {
+  return (
+    <svg width="16" height="16" viewBox="0 0 24 24" fill="none">
+      <rect x="7" y="4" width="10" height="16" rx="2" stroke="currentColor" strokeWidth="2" />
+      <path d="M2 9v6M22 9v6" stroke="currentColor" strokeWidth="2" strokeLinecap="round" />
+    </svg>
+  );
+}
+
+/* --------------------------- Events List View ----------------------------- */
+
+function EventsListView({ events, onOpen, onAdd, onDelete }) {
+  const grandTotal = events.reduce(
+    (sum, e) => sum + e.products.reduce((s, p) => s + p.cells.filter(Boolean).length * p.price, 0),
+    0
+  );
+  const grandSold = events.reduce(
+    (sum, e) => sum + e.products.reduce((s, p) => s + p.cells.filter(Boolean).length, 0),
+    0
+  );
+  const grandStock = events.reduce(
+    (sum, e) => sum + e.products.reduce((s, p) => s + p.stock, 0),
+    0
+  );
+  const grandRemaining = grandStock - grandSold;
+  const eventCount = events.length;
+  const productCount = events.reduce((sum, e) => sum + e.products.length, 0);
+
+  function handleExportCsv() {
+    const rows = [["イベント名", "商品名", "単価", "販売時刻"]];
+    events.forEach((e) => {
+      e.products.forEach((p) => {
+        p.cells.forEach((filled, i) => {
+          if (filled) {
+            const time = (p.cellTimes && p.cellTimes[i]) || "";
+            rows.push([e.name || "無題のイベント", p.name || "無題の商品", p.price, time]);
+          }
+        });
+      });
+    });
+    if (rows.length === 1) {
+      rows.push(["（まだ販売記録がありません）", "", "", ""]);
+    }
+    const stamp = nowTimeStr().replace(/:/g, "");
+    downloadCsv(`urepeta_sales_${stamp}.csv`, rows);
+  }
+
+  return (
+    <div className="view-pad">
+      {events.length > 0 && (
+        <>
+          <div className="stat-banner">
+            <span className="stat-banner-label">これまでの総売上</span>
+            <span className="stat-banner-value">{yen(grandTotal)}</span>
+            <span className="stat-banner-sub">
+              全 {eventCount} イベント・{productCount} 商品を集計
+            </span>
+          </div>
+          <div className="summary-grid">
+            <SummaryTile label="総販売数" value={`${grandSold} 点`} accent="indigo" />
+            <SummaryTile label="残り在庫" value={`${grandRemaining} 点`} accent="plum" />
+            <SummaryTile label="開催イベント数" value={`${eventCount} 件`} accent="gold" />
+          </div>
+          <button className="ghost-btn csv-btn" onClick={handleExportCsv}>
+            <CsvIcon /> 売上データをCSV出力
+          </button>
+        </>
+      )}
+
+      {events.length === 0 ? (
+        <EmptyState
+          icon="star"
+          title="まだイベントがありません"
+          body="「新しいイベントを作成」から、出店イベントごとのページを作ってみましょう。"
+        />
+      ) : (
+        <div className="card-list">
+          {events.map((e) => {
+            const sold = e.products.reduce((s, p) => s + p.cells.filter(Boolean).length, 0);
+            const stock = e.products.reduce((s, p) => s + p.stock, 0);
+            const revenue = e.products.reduce(
+              (s, p) => s + p.cells.filter(Boolean).length * p.price,
+              0
+            );
+            return (
+              <div key={e.id} className="event-card" onClick={() => onOpen(e.id)}>
+                <div className="event-card-main">
+                  <h3>{e.name || "無題のイベント"}</h3>
+                  <p className="muted">
+                    {[e.date, e.venue].filter(Boolean).join(" ・ ") || "日付・会場未設定"}
+                  </p>
+                  <div className="event-card-stats">
+                    <span>商品 {e.products.length}種</span>
+                    <span>販売 {sold}/{stock}</span>
+                  </div>
+                </div>
+                <div className="event-card-side">
+                  <span className="event-revenue">{yen(revenue)}</span>
+                  <button
+                    className="icon-btn danger"
+                    aria-label="イベントを削除"
+                    onClick={(ev) => {
+                      ev.stopPropagation();
+                      onDelete(e.id);
+                    }}
+                  >
+                    <TrashIcon />
+                  </button>
+                </div>
+              </div>
+            );
+          })}
+        </div>
+      )}
+
+      <button className="fab" onClick={onAdd}>
+        <PlusIcon /> 新しいイベントを作成
+      </button>
+    </div>
+  );
+}
+
+/* --------------------------- Event Detail View ---------------------------- */
+
+function EventDetailView({ event, onOpenProduct, onAddProduct, onDeleteProduct }) {
+  const totalSold = event.products.reduce((s, p) => s + p.cells.filter(Boolean).length, 0);
+  const totalStock = event.products.reduce((s, p) => s + p.stock, 0);
+  const totalRevenue = event.products.reduce(
+    (s, p) => s + p.cells.filter(Boolean).length * p.price,
+    0
+  );
+
+  return (
+    <div className="view-pad">
+      <div className="summary-grid">
+        <SummaryTile label="総売上" value={yen(totalRevenue)} accent="gold" />
+        <SummaryTile label="販売数" value={`${totalSold} 点`} accent="indigo" />
+        <SummaryTile label="残り在庫" value={`${totalStock - totalSold} 点`} accent="plum" />
+      </div>
+
+      {event.products.length === 0 ? (
+        <EmptyState
+          icon="square"
+          title="商品がまだ登録されていません"
+          body="「商品を追加」から、頒布する本やグッズを登録しましょう。"
+        />
+      ) : (
+        <div className="card-list">
+          {event.products.map((p) => {
+            const sold = p.cells.filter(Boolean).length;
+            const remaining = p.stock - sold;
+            const pct = p.stock > 0 ? Math.round((sold / p.stock) * 100) : 0;
+            return (
+              <div key={p.id} className="product-card" onClick={() => onOpenProduct(p.id)}>
+                <Seal shape={p.shape} color={p.color} pattern={p.pattern} filled size={38} />
+                <div className="product-card-main">
+                  <h3>{p.name || "無題の商品"}</h3>
+                  <p className="muted">{yen(p.price)} ／点</p>
+                  <div className="progress-track">
+                    <div
+                      className="progress-fill"
+                      style={{ width: `${pct}%`, background: p.color }}
+                    />
+                  </div>
+                  <div className="product-card-stats">
+                    <span>残り {remaining}</span>
+                    <span>販売 {sold}/{p.stock}</span>
+                  </div>
+                </div>
+                <div className="product-card-side">
+                  <span className="event-revenue small">{yen(sold * p.price)}</span>
+                  <button
+                    className="icon-btn danger"
+                    aria-label="商品を削除"
+                    onClick={(ev) => {
+                      ev.stopPropagation();
+                      onDeleteProduct(p.id);
+                    }}
+                  >
+                    <TrashIcon />
+                  </button>
+                </div>
+              </div>
+            );
+          })}
+        </div>
+      )}
+
+      <button className="fab" onClick={onAddProduct}>
+        <PlusIcon /> 商品を追加
+      </button>
+    </div>
+  );
+}
+
+/* -------------------------- Product Detail View ---------------------------- */
+
+function ProductDetailView({ event, product, onToggleCell, onSell, onAddStock, onReset, onDelete }) {
+  const sold = product.cells.filter(Boolean).length;
+  const remaining = product.stock - sold;
+  const revenue = sold * product.price;
+
+  const [qty, setQty] = useState(1);
+  const [received, setReceived] = useState("");
+
+  useEffect(() => {
+    if (qty > Math.max(remaining, 1)) setQty(Math.max(1, remaining));
+  }, [remaining]); // eslint-disable-line
+
+  const subtotal = qty * product.price;
+  const receivedNum = received === "" ? null : Number(received);
+  const change = receivedNum !== null && !Number.isNaN(receivedNum) ? receivedNum - subtotal : null;
+  const insufficient = change !== null && change < 0;
+
+  function confirmSale() {
+    if (qty < 1 || qty > remaining) return;
+    onSell(qty);
+    setReceived("");
+    setQty(1);
+  }
+
+  return (
+    <div className="view-pad">
+      <div className="product-hero">
+        <Seal shape={product.shape} color={product.color} pattern={product.pattern} filled size={54} />
+        <div className="product-hero-text">
+          <h2>{product.name || "無題の商品"}</h2>
+          <p className="muted">{yen(product.price)} ／点・全 {product.stock} 点</p>
+        </div>
+      </div>
+
+      <div className="summary-grid">
+        <SummaryTile label="売上" value={yen(revenue)} accent="gold" />
+        <SummaryTile label="販売数" value={`${sold} 点`} accent="indigo" />
+        <SummaryTile label="残り" value={`${remaining} 点`} accent="plum" />
+      </div>
+
+      {/* グリッド */}
+      <section className="grid-card">
+        <div className="grid-card-head">
+          <h3 className="section-title" style={{ margin: 0 }}>在庫マス目（タップで記録／取消）</h3>
+          <span className="grid-legend">■塗りつぶし＝販売済み　□枠のみ＝在庫あり</span>
+        </div>
+        <div className="cell-grid">
+          {product.cells.map((filled, i) => (
+            <button
+              key={i}
+              className={`cell-btn ${filled ? "cell-filled" : ""}`}
+              onClick={() => onToggleCell(i)}
+              aria-pressed={filled}
+              aria-label={`${i + 1}番目 ${filled ? "販売済み・タップで取消" : "在庫あり・タップで販売記録"}`}
+            >
+              <Seal shape={product.shape} color={product.color} pattern={product.pattern} filled={filled} size="100%" />
+            </button>
+          ))}
+        </div>
+      </section>
+
+      {/* おつり計算機 */}
+      <section className="calc-card">
+        <h3 className="section-title">会計・おつり計算</h3>
+
+        <div className="calc-row">
+          <span className="calc-label">数量</span>
+          <div className="stepper">
+            <button
+              className="stepper-btn"
+              onClick={() => setQty((q) => Math.max(1, q - 1))}
+              aria-label="数量を減らす"
+            >
+              −
+            </button>
+            <span className="stepper-value">{qty}</span>
+            <button
+              className="stepper-btn"
+              onClick={() => setQty((q) => Math.min(Math.max(remaining, 1), q + 1))}
+              aria-label="数量を増やす"
+            >
+              ＋
+            </button>
+          </div>
+        </div>
+
+        <div className="calc-row">
+          <span className="calc-label">小計</span>
+          <span className="calc-subtotal">{yen(subtotal)}</span>
+        </div>
+
+        <label className="calc-row calc-input-row">
+          <span className="calc-label">お預かり金額</span>
+          <input
+            type="number"
+            inputMode="numeric"
+            placeholder="例）1000"
+            value={received}
+            onChange={(e) => setReceived(e.target.value)}
+            className="calc-input"
+          />
+        </label>
+
+        <div className={`change-display ${insufficient ? "change-warn" : ""}`}>
+          <span className="change-display-label">
+            {insufficient ? <WarnIcon /> : <CheckIcon />}
+            おつり
+          </span>
+          <strong>{change === null ? "―" : insufficient ? "金額不足" : yen(change)}</strong>
+        </div>
+
+        <button
+          className="primary-btn"
+          disabled={remaining <= 0 || qty > remaining}
+          onClick={confirmSale}
+        >
+          {remaining <= 0 ? "在庫切れです" : `${qty}点の販売を記録してシールを貼る`}
+        </button>
+      </section>
+
+      <section className="danger-zone">
+        <button className="ghost-btn" onClick={() => onAddStock(10)}>在庫を＋10部 追加する</button>
+        <button className="ghost-btn" onClick={onReset}>販売記録をリセット</button>
+        <button className="ghost-btn danger-text" onClick={onDelete}>この商品を削除</button>
+      </section>
+    </div>
+  );
+}
+
+/* --------------------------- Shared small parts --------------------------- */
+
+function SummaryTile({ label, value, accent }) {
+  return (
+    <div className={`summary-tile accent-${accent}`}>
+      <span className="summary-label">{label}</span>
+      <span className="summary-value">{value}</span>
+    </div>
+  );
+}
+
+function EmptyState({ title, body }) {
+  return (
+    <div className="empty-state">
+      <Seal shape="square" color="#7A6340" pattern="none" filled={false} size={48} />
+      <h3>{title}</h3>
+      <p>{body}</p>
+    </div>
+  );
+}
+
+function PlusIcon() {
+  return (
+    <svg width="18" height="18" viewBox="0 0 24 24" fill="none">
+      <path d="M12 5v14M5 12h14" stroke="currentColor" strokeWidth="2.4" strokeLinecap="round" />
+    </svg>
+  );
+}
+function TrashIcon() {
+  return (
+    <svg width="18" height="18" viewBox="0 0 24 24" fill="none">
+      <path
+        d="M4 7h16M9 7V5a1 1 0 011-1h4a1 1 0 011 1v2m-8 0v12a1 1 0 001 1h6a1 1 0 001-1V7"
+        stroke="currentColor"
+        strokeWidth="2"
+        strokeLinecap="round"
+        strokeLinejoin="round"
+      />
+    </svg>
+  );
+}
+function CsvIcon() {
+  return (
+    <svg width="17" height="17" viewBox="0 0 24 24" fill="none">
+      <path
+        d="M6 3h9l5 5v13a1 1 0 01-1 1H6a1 1 0 01-1-1V4a1 1 0 011-1z"
+        stroke="currentColor"
+        strokeWidth="2"
+        strokeLinejoin="round"
+      />
+      <path d="M14 3v5h5" stroke="currentColor" strokeWidth="2" strokeLinejoin="round" />
+      <path d="M8 13v5M12 13v5M16 13v5" stroke="currentColor" strokeWidth="2" strokeLinecap="round" />
+    </svg>
+  );
+}
+function WarnIcon() {
+  return (
+    <svg width="15" height="15" viewBox="0 0 24 24" fill="none" style={{ flexShrink: 0 }}>
+      <path
+        d="M12 3.5l10 17.5H2L12 3.5z"
+        stroke="currentColor"
+        strokeWidth="2"
+        strokeLinejoin="round"
+      />
+      <path d="M12 10v4.5" stroke="currentColor" strokeWidth="2" strokeLinecap="round" />
+      <circle cx="12" cy="17.3" r="1.1" fill="currentColor" />
+    </svg>
+  );
+}
+function CheckIcon() {
+  return (
+    <svg width="15" height="15" viewBox="0 0 24 24" fill="none" style={{ flexShrink: 0 }}>
+      <circle cx="12" cy="12" r="9.5" stroke="currentColor" strokeWidth="2" />
+      <path d="M8 12.5l2.7 2.7L16.5 9" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" />
+    </svg>
+  );
+}
+
+/* -------------------------------- Modals ---------------------------------- */
+
+function ModalShell({ title, onCancel, children }) {
+  return (
+    <div className="modal-overlay" onClick={onCancel}>
+      <div className="modal-sheet" onClick={(e) => e.stopPropagation()}>
+        <div className="modal-head">
+          <h2>{title}</h2>
+          <button className="icon-btn" onClick={onCancel} aria-label="閉じる">
+            <svg width="20" height="20" viewBox="0 0 24 24" fill="none">
+              <path d="M6 6l12 12M18 6L6 18" stroke="currentColor" strokeWidth="2.2" strokeLinecap="round" />
+            </svg>
+          </button>
+        </div>
+        <div className="modal-body">{children}</div>
+      </div>
+    </div>
+  );
+}
+
+function AddEventModal({ onCancel, onSubmit }) {
+  const [name, setName] = useState("");
+  const [date, setDate] = useState("");
+  const [venue, setVenue] = useState("");
+
+  return (
+    <ModalShell title="新しいイベントを作成" onCancel={onCancel}>
+      <label className="field">
+        <span>イベント名</span>
+        <input
+          className="field-input"
+          placeholder="例）コミックマーケット105"
+          value={name}
+          onChange={(e) => setName(e.target.value)}
+          autoFocus
+        />
+      </label>
+      <label className="field">
+        <span>開催日（任意）</span>
+        <input className="field-input" type="date" value={date} onChange={(e) => setDate(e.target.value)} />
+      </label>
+      <label className="field">
+        <span>会場・配置（任意）</span>
+        <input
+          className="field-input"
+          placeholder="例）東7ホール ま-12a"
+          value={venue}
+          onChange={(e) => setVenue(e.target.value)}
+        />
+      </label>
+      <button
+        className="primary-btn"
+        disabled={!name.trim()}
+        onClick={() => onSubmit({ name: name.trim(), date, venue: venue.trim() })}
+      >
+        作成する
+      </button>
+    </ModalShell>
+  );
+}
+
+function AddProductModal({ onCancel, onSubmit }) {
+  const [name, setName] = useState("");
+  const [price, setPrice] = useState("500");
+  const [stock, setStock] = useState("30");
+  const [shape, setShape] = useState(SHAPES[0].id);
+  const [color, setColor] = useState(COLORS[0].hex);
+  const [pattern, setPattern] = useState(PATTERNS[0].id);
+
+  const canSubmit = name.trim() && Number(price) > 0 && Number(stock) > 0;
+
+  return (
+    <ModalShell title="商品を追加" onCancel={onCancel}>
+      <label className="field">
+        <span>商品名</span>
+        <input
+          className="field-input"
+          placeholder="例）オリジナルアクセサリー"
+          value={name}
+          onChange={(e) => setName(e.target.value)}
+          autoFocus
+        />
+      </label>
+      <div className="field-row">
+        <label className="field">
+          <span>単価（円）</span>
+          <input
+            className="field-input"
+            type="number"
+            inputMode="numeric"
+            value={price}
+            onChange={(e) => setPrice(e.target.value)}
+          />
+        </label>
+        <label className="field">
+          <span>部数（在庫数）</span>
+          <input
+            className="field-input"
+            type="number"
+            inputMode="numeric"
+            value={stock}
+            onChange={(e) => setStock(e.target.value)}
+          />
+        </label>
+      </div>
+
+      <div className="seal-preview-row">
+        <Seal shape={shape} color={color} pattern={pattern} filled size={64} />
+        <p className="muted">シールのデザイン（色・形・模様の組み合わせで見分けやすく）</p>
+      </div>
+
+      <div className="picker-block">
+        <span className="picker-label">形</span>
+        <div className="picker-row">
+          {SHAPES.map((s) => (
+            <button
+              key={s.id}
+              className={`picker-chip ${shape === s.id ? "picker-chip-active" : ""}`}
+              onClick={() => setShape(s.id)}
+            >
+              <Seal shape={s.id} color={color} pattern={pattern} filled size={22} />
+              {s.label}
+            </button>
+          ))}
+        </div>
+      </div>
+
+      <div className="picker-block">
+        <span className="picker-label">模様</span>
+        <div className="picker-row">
+          {PATTERNS.map((pt) => (
+            <button
+              key={pt.id}
+              className={`picker-chip ${pattern === pt.id ? "picker-chip-active" : ""}`}
+              onClick={() => setPattern(pt.id)}
+            >
+              <Seal shape={shape} color={color} pattern={pt.id} filled size={22} />
+              {pt.label}
+            </button>
+          ))}
+        </div>
+      </div>
+
+      <div className="picker-block">
+        <span className="picker-label">色</span>
+        <div className="picker-row wrap">
+          {COLORS.map((c) => (
+            <button
+              key={c.id}
+              className={`color-chip ${color === c.hex ? "color-chip-active" : ""}`}
+              style={{ background: c.hex }}
+              onClick={() => setColor(c.hex)}
+              aria-label={c.label}
+              title={c.label}
+            />
+          ))}
+        </div>
+      </div>
+
+      <button
+        className="primary-btn"
+        disabled={!canSubmit}
+        onClick={() =>
+          onSubmit({
+            name: name.trim(),
+            price: Number(price),
+            stock: Number(stock),
+            cells: makeCells(Number(stock)),
+            shape,
+            color,
+            pattern,
+          })
+        }
+      >
+        商品を追加する
+      </button>
+    </ModalShell>
+  );
+}
+
+function ConfirmModal({ title, message, danger, onConfirm, onCancel }) {
+  return (
+    <ModalShell title={title} onCancel={onCancel}>
+      <p className="confirm-message">{message}</p>
+      <div className="confirm-actions">
+        <button className="ghost-btn" onClick={onCancel}>キャンセル</button>
+        <button className={`primary-btn ${danger ? "danger-btn" : ""}`} onClick={onConfirm}>
+          実行する
+        </button>
+      </div>
+    </ModalShell>
+  );
+}
+
+/* -------------------------------- Styles ----------------------------------- */
+
+function GlobalStyle() {
+  return (
+    <style>{`
+      @import url('https://fonts.googleapis.com/css2?family=Zen+Maru+Gothic:wght@500;700;900&family=Zen+Kaku+Gothic+New:wght@400;500;700&display=swap');
+
+      :root {
+        --bg: #F2E8D6;
+        --surface: #FBF5E9;
+        --surface-alt: #EFE0C3;
+        --ink: #34281B;
+        --ink-soft: #6E5D48;
+        --border: #99794A;
+        --accent: #3E5C76;
+        --accent-dark: #2B4457;
+        --accent-2: #8C5383;
+        --gold: #7C5410;
+        --gold-bg: #F2DFA9;
+        --danger: #A3402E;
+        --danger-bg: #F3D9CF;
+        --radius-lg: 20px;
+        --radius-md: 14px;
+        --radius-sm: 9px;
+      }
+
+      * { box-sizing: border-box; }
+
+      .app-root {
+        min-height: 100vh;
+        background: var(--bg);
+        background-image:
+          radial-gradient(circle at 6px 6px, rgba(52,40,27,0.05) 1px, transparent 1.4px);
+        background-size: 22px 22px;
+        color: var(--ink);
+        font-family: 'Zen Kaku Gothic New', 'Noto Sans JP', sans-serif;
+        max-width: 560px;
+        margin: 0 auto;
+        min-height: 100dvh;
+        display: flex;
+        flex-direction: column;
+        -webkit-tap-highlight-color: transparent;
+      }
+
+      h1, h2, h3 { font-family: 'Zen Maru Gothic', 'Noto Sans JP', sans-serif; margin: 0; }
+
+      button { font-family: inherit; cursor: pointer; }
+      input { font-family: inherit; }
+
+      /* ---------- Header ---------- */
+      .header {
+        position: sticky;
+        top: 0;
+        z-index: 20;
+        background: rgba(242,232,214,0.92);
+        backdrop-filter: blur(6px);
+        border-bottom: 2px solid var(--border);
+        padding: 14px 16px;
+      }
+      .header-row { display: flex; align-items: center; gap: 12px; }
+      .header-mark {
+        width: 40px; height: 40px; border-radius: 12px;
+        background: var(--surface);
+        display: flex; align-items: center; justify-content: center;
+        border: 2px solid var(--border);
+        flex-shrink: 0;
+      }
+      .header-text h1 { font-size: 19px; font-weight: 900; color: var(--ink); line-height: 1.3; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+      .header-text p { margin: 2px 0 0; font-size: 12.5px; color: var(--ink-soft); font-weight: 500; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+      .header-text { flex: 1; min-width: 0; }
+
+      .vibrate-toggle {
+        flex-shrink: 0;
+        display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 2px;
+        border-radius: 12px; border: 2px solid var(--border);
+        background: var(--surface); color: var(--ink-soft);
+        padding: 6px 8px; min-width: 56px;
+        transition: transform .12s ease, background .12s ease, color .12s ease, border-color .12s ease;
+      }
+      .vibrate-toggle:active { transform: scale(0.93); }
+      .vibrate-toggle-label { font-size: 9.5px; font-weight: 700; white-space: nowrap; }
+      .vibrate-toggle.vibrate-on { background: #E4ECF1; border-color: var(--accent); color: var(--accent-dark); }
+      .vibrate-toggle.vibrate-off { background: var(--surface); border-color: var(--border); color: var(--ink-soft); }
+
+      .icon-btn {
+        width: 40px; height: 40px; border-radius: 12px;
+        border: 2px solid var(--border);
+        background: var(--surface);
+        color: var(--ink);
+        display: flex; align-items: center; justify-content: center;
+        flex-shrink: 0;
+        transition: transform .12s ease, background .12s ease;
+      }
+      .icon-btn:active { transform: scale(0.92); }
+      .icon-btn.danger { color: var(--danger); border-color: #E3B7AA; background: var(--danger-bg); }
+
+      /* ---------- Main ---------- */
+      .main { flex: 1; padding-bottom: 40px; }
+      .view-pad { padding: 16px; display: flex; flex-direction: column; gap: 16px; }
+
+      /* ---------- Stat banner ---------- */
+      .stat-banner {
+        background: linear-gradient(135deg, var(--accent-dark), var(--accent));
+        color: #FBF5E9;
+        border-radius: var(--radius-lg);
+        padding: 16px 18px;
+        display: flex; flex-direction: column; gap: 4px;
+        box-shadow: 0 6px 16px rgba(43,68,87,0.28);
+      }
+      .stat-banner-label { font-size: 12.5px; opacity: 0.85; font-weight: 600; }
+      .stat-banner-value { font-size: 26px; font-weight: 900; font-family: 'Zen Maru Gothic', sans-serif; }
+      .stat-banner-sub { font-size: 11.5px; opacity: 0.8; font-weight: 600; margin-top: 2px; }
+
+      /* ---------- Summary tiles ---------- */
+      .summary-grid { display: grid; grid-template-columns: repeat(3, 1fr); gap: 10px; }
+      .summary-tile {
+        background: var(--surface);
+        border: 2px solid var(--border);
+        border-radius: var(--radius-md);
+        padding: 10px 8px;
+        display: flex; flex-direction: column; gap: 4px;
+        text-align: center;
+      }
+      .summary-label { font-size: 11px; color: var(--ink-soft); font-weight: 700; }
+      .summary-value { font-size: 16px; font-weight: 900; font-family: 'Zen Maru Gothic', sans-serif; }
+      .summary-tile.accent-gold .summary-value { color: var(--gold); }
+      .summary-tile.accent-indigo .summary-value { color: var(--accent); }
+      .summary-tile.accent-plum .summary-value { color: var(--accent-2); }
+
+      /* ---------- Cards ---------- */
+      .card-list { display: flex; flex-direction: column; gap: 10px; }
+
+      .event-card, .product-card {
+        background: var(--surface);
+        border: 2px solid var(--border);
+        border-radius: var(--radius-lg);
+        padding: 14px;
+        display: flex; align-items: center; gap: 12px;
+        transition: transform .12s ease, box-shadow .12s ease;
+      }
+      .event-card:active, .product-card:active { transform: scale(0.985); }
+      .event-card-main, .product-card-main { flex: 1; min-width: 0; }
+      .event-card h3, .product-card h3 { font-size: 15.5px; font-weight: 700; margin-bottom: 2px;
+        overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+      .muted { color: var(--ink-soft); font-size: 12.5px; margin: 0; font-weight: 500; }
+      .event-card-stats, .product-card-stats {
+        display: flex; gap: 10px; margin-top: 6px; font-size: 12px; color: var(--ink-soft); font-weight: 600;
+      }
+      .event-card-side, .product-card-side {
+        display: flex; flex-direction: column; align-items: flex-end; gap: 8px; flex-shrink: 0;
+      }
+      .event-revenue { font-weight: 900; font-family: 'Zen Maru Gothic', sans-serif; color: var(--gold); font-size: 15px; }
+      .event-revenue.small { font-size: 13px; }
+
+      .progress-track {
+        margin-top: 8px; height: 8px; border-radius: 6px; background: var(--surface-alt);
+        overflow: hidden; border: 1px solid var(--border);
+      }
+      .progress-fill { height: 100%; border-radius: 6px; transition: width .25s ease; }
+
+      /* ---------- Empty state ---------- */
+      .empty-state {
+        display: flex; flex-direction: column; align-items: center; text-align: center;
+        gap: 10px; padding: 40px 20px; color: var(--ink-soft);
+        background: var(--surface); border: 2px dashed var(--border); border-radius: var(--radius-lg);
+      }
+      .empty-state h3 { font-size: 16px; color: var(--ink); }
+      .empty-state p { font-size: 13px; margin: 0; max-width: 260px; line-height: 1.6; }
+
+      /* ---------- FAB / primary button ---------- */
+      .fab {
+        position: sticky; bottom: 14px; margin-top: 4px; align-self: stretch;
+        background: var(--accent);
+        color: #FBF5E9;
+        border: none; border-radius: 999px;
+        padding: 15px 20px;
+        font-size: 15px; font-weight: 700;
+        display: flex; align-items: center; justify-content: center; gap: 8px;
+        box-shadow: 0 8px 20px rgba(43,68,87,0.35);
+        transition: transform .12s ease, background .12s ease;
+      }
+      .fab:active { transform: scale(0.97); background: var(--accent-dark); }
+
+      .primary-btn {
+        width: 100%; border: none; border-radius: var(--radius-md);
+        background: var(--accent); color: #FBF5E9;
+        padding: 15px; font-size: 15px; font-weight: 700;
+        transition: transform .12s ease, background .12s ease, opacity .12s ease;
+      }
+      .primary-btn:active { transform: scale(0.98); }
+      .primary-btn:disabled { background: #C9BBA0; color: #8A7C63; cursor: not-allowed; }
+      .primary-btn.danger-btn { background: var(--danger); }
+
+      .ghost-btn {
+        border: 2px solid var(--border); background: var(--surface); color: var(--ink);
+        border-radius: var(--radius-md); padding: 12px; font-size: 13.5px; font-weight: 700;
+        transition: transform .12s ease;
+      }
+      .ghost-btn:active { transform: scale(0.97); }
+      .ghost-btn.danger-text { color: var(--danger); }
+      .csv-btn { display: flex; align-items: center; justify-content: center; gap: 8px; color: var(--accent-dark); }
+
+      /* ---------- Product hero ---------- */
+      .product-hero { display: flex; align-items: center; gap: 14px; }
+      .product-hero-text h2 { font-size: 18px; font-weight: 900; }
+
+      /* ---------- Calculator ---------- */
+      .calc-card, .grid-card {
+        background: var(--surface); border: 2px solid var(--border);
+        border-radius: var(--radius-lg); padding: 16px; display: flex; flex-direction: column; gap: 12px;
+      }
+      .section-title { font-size: 14.5px; font-weight: 900; }
+      .calc-row { display: flex; align-items: center; justify-content: space-between; }
+      .calc-label { font-size: 13.5px; font-weight: 700; color: var(--ink-soft); }
+      .stepper { display: flex; align-items: center; gap: 12px; }
+      .stepper-btn {
+        width: 38px; height: 38px; border-radius: 10px; border: 2px solid var(--accent);
+        background: var(--surface); color: var(--accent); font-size: 19px; font-weight: 900;
+        display: flex; align-items: center; justify-content: center;
+      }
+      .stepper-btn:active { transform: scale(0.9); }
+      .stepper-value { font-size: 18px; font-weight: 900; min-width: 28px; text-align: center; }
+      .calc-subtotal { font-size: 17px; font-weight: 900; color: var(--accent); }
+
+      .calc-input-row { flex-direction: row; }
+      .calc-input {
+        width: 130px; text-align: right; border: 2px solid var(--border); border-radius: var(--radius-sm);
+        padding: 9px 10px; font-size: 16px; font-weight: 700; background: #fff; color: var(--ink);
+      }
+      .calc-input:focus { outline: 3px solid var(--accent); outline-offset: 1px; border-color: var(--accent); }
+
+      .change-display {
+        background: var(--gold-bg); border-radius: var(--radius-md);
+        padding: 12px 14px; display: flex; align-items: center; justify-content: space-between;
+        border: 2px solid #DEC170;
+      }
+      .change-display span { font-size: 13px; font-weight: 700; color: #6B4E10; }
+      .change-display-label { display: flex; align-items: center; gap: 5px; }
+      .change-display strong { font-size: 21px; font-weight: 900; color: var(--gold); font-family: 'Zen Maru Gothic', sans-serif; }
+      .change-display.change-warn { background: var(--danger-bg); border-color: #C98A78; }
+      .change-display.change-warn strong { color: var(--danger); font-size: 15px; }
+      .change-display.change-warn span { color: #7A3323; }
+
+      /* ---------- Grid ---------- */
+      .grid-card-head { display: flex; flex-direction: column; gap: 4px; }
+      .grid-legend { font-size: 11px; color: var(--ink-soft); font-weight: 600; }
+      .cell-grid {
+        display: grid; grid-template-columns: repeat(5, 1fr);
+        gap: 6px;
+      }
+      .cell-btn {
+        aspect-ratio: 1; width: 100%; min-height: 0; border-radius: 12px; border: none; background: transparent;
+        display: flex; align-items: center; justify-content: center;
+        padding: 1px;
+        transition: transform .1s ease;
+      }
+      .cell-btn svg { width: 100%; height: 100%; display: block; }
+      .cell-btn:active { transform: scale(0.85); }
+      .cell-btn.cell-filled { animation: stampPop .28s ease; }
+
+      @keyframes stampPop {
+        0% { transform: scale(0.5) rotate(-8deg); opacity: 0.4; }
+        60% { transform: scale(1.18) rotate(4deg); }
+        100% { transform: scale(1) rotate(0deg); opacity: 1; }
+      }
+
+      .danger-zone { display: flex; flex-direction: column; gap: 8px; }
+
+      /* ---------- Modals ---------- */
+      .modal-overlay {
+        position: fixed; inset: 0; background: rgba(52,40,27,0.45);
+        display: flex; align-items: flex-end; justify-content: center; z-index: 50;
+        padding: 0;
+      }
+      .modal-sheet {
+        background: var(--bg); width: 100%; max-width: 560px;
+        border-radius: 22px 22px 0 0; max-height: 88vh; overflow-y: auto;
+        padding: 18px 18px 26px; box-shadow: 0 -10px 30px rgba(0,0,0,0.25);
+      }
+      .modal-head { display: flex; align-items: center; justify-content: space-between; margin-bottom: 14px; }
+      .modal-head h2 { font-size: 17px; font-weight: 900; }
+      .modal-body { display: flex; flex-direction: column; gap: 14px; }
+
+      .field { display: flex; flex-direction: column; gap: 6px; flex: 1; }
+      .field span { font-size: 12.5px; font-weight: 700; color: var(--ink-soft); }
+      .field-input {
+        border: 2px solid var(--border); border-radius: var(--radius-sm);
+        padding: 12px; font-size: 15px; background: #fff; color: var(--ink); width: 100%;
+      }
+      .field-input:focus { outline: 3px solid var(--accent); outline-offset: 1px; border-color: var(--accent); }
+      .field-row { display: flex; gap: 10px; }
+
+      .seal-preview-row {
+        display: flex; align-items: center; gap: 12px; background: var(--surface);
+        border: 2px solid var(--border); border-radius: var(--radius-md); padding: 12px;
+      }
+      .seal-preview-row .muted { line-height: 1.5; }
+
+      .picker-block { display: flex; flex-direction: column; gap: 8px; }
+      .picker-label { font-size: 12.5px; font-weight: 700; color: var(--ink-soft); }
+      .picker-row { display: flex; gap: 8px; flex-wrap: wrap; }
+      .picker-chip {
+        display: flex; align-items: center; gap: 6px;
+        border: 2px solid var(--border); background: var(--surface); border-radius: 999px;
+        padding: 7px 12px 7px 8px; font-size: 12.5px; font-weight: 700; color: var(--ink);
+      }
+      .picker-chip-active { border-color: var(--accent); background: #E4ECF1; color: var(--accent-dark); }
+
+      .color-chip {
+        width: 34px; height: 34px; border-radius: 10px; border: 3px solid var(--surface);
+        box-shadow: 0 0 0 2px var(--border);
+      }
+      .color-chip-active { box-shadow: 0 0 0 2px var(--ink); }
+
+      .confirm-message { font-size: 14px; line-height: 1.7; color: var(--ink-soft); font-weight: 500; }
+      .confirm-actions { display: flex; gap: 10px; }
+      .confirm-actions .ghost-btn, .confirm-actions .primary-btn { flex: 1; }
+
+      @media (min-width: 460px) {
+        .modal-overlay { align-items: center; }
+        .modal-sheet { border-radius: 22px; }
+      }
+    `}</style>
+  );
+}
