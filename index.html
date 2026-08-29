@@ -4,1632 +4,374 @@
 <meta charset="UTF-8" />
 <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1, user-scalable=no" />
 <title>うれペタ | うれたらペタッとうれしいアプリ</title>
-<meta name="description" content="対面販売・ハンドメイド出店向けの在庫・売上管理アプリ。シールを貼る感覚で在庫を記録し、おつり計算やCSV出力もその場でできます。" />
+<meta name="description" content="対面販売・ハンドメイド出店向けの在庫・売上管理アプリ。" />
 <link rel="icon" href="data:," />
-
-<script>
-  window.addEventListener(
-    "error",
-    function (e) {
-      var msg = e && e.message ? e.message : "不明なエラーが発生しました";
-      if (e && e.target && e.target.tagName === "SCRIPT") {
-        msg = "外部スクリプトの読み込みに失敗しました: " + (e.target.src || "");
-      }
-      var box = document.createElement("div");
-      box.style.cssText =
-        "position:fixed;top:0;left:0;right:0;background:#A3402E;color:#fff;" +
-        "padding:12px 16px;font-family:sans-serif;font-size:13px;z-index:99999;" +
-        "white-space:pre-wrap;line-height:1.6;";
-      box.textContent = "⚠ " + msg;
-      document.body.appendChild(box);
-    },
-    true
-  );
-</script>
 
 <script src="https://cdnjs.cloudflare.com/ajax/libs/react/18.3.1/umd/react.production.min.js" crossorigin="anonymous"></script>
 <script src="https://cdnjs.cloudflare.com/ajax/libs/react-dom/18.3.1/umd/react-dom.production.min.js" crossorigin="anonymous"></script>
 <script src="https://cdnjs.cloudflare.com/ajax/libs/babel-standalone/7.28.4/babel.min.js" crossorigin="anonymous"></script>
 
 <style>
-  html, body { margin: 0; padding: 0; background: #F2E8D6; }
+  :root {
+    --bg-color: #F2E8D6;
+    --card-bg: #FDF5E6;
+    --text-main: #3A352F;
+    --text-muted: #7A6F62;
+    --accent-gold: #C8A400;
+    --accent-indigo: #0072B2;
+    --accent-plum: #CC79A7;
+    --danger: #A3402E;
+    --border-color: #E2D4BD;
+  }
+  * { box-sizing: border-box; }
+  body {
+    font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+    color: var(--text-main);
+    background: var(--bg-color);
+    margin: 0; padding: 0;
+    -webkit-tap-highlight-color: transparent;
+  }
+  .app-root {
+    max-width: 480px; margin: 0 auto; min-height: 100vh;
+    background: var(--bg-color); display: flex; flex-direction: column;
+    position: relative; padding-bottom: 90px;
+  }
+  .header {
+    background: var(--card-bg); border-bottom: 1px solid var(--border-color);
+    position: sticky; top: 0; z-index: 10; padding: 12px 16px;
+  }
+  .header-row { display: flex; align-items: center; gap: 12px; }
+  .header-text h1 { font-size: 17px; margin: 0 0 2px 0; font-weight: 700; }
+  .header-text p { font-size: 11px; margin: 0; color: var(--text-muted); }
+  .header-mark { width: 36px; height: 36px; display: flex; align-items: center; justify-content: center; }
+  .main { flex: 1; }
+  .view-pad { padding: 16px; display: flex; flex-direction: column; gap: 16px; }
+  .stat-banner {
+    background: var(--card-bg); border: 1px solid var(--border-color);
+    border-radius: 12px; padding: 16px; text-align: center;
+    display: flex; flex-direction: column; gap: 4px;
+  }
+  .stat-banner-label { font-size: 12px; color: var(--text-muted); }
+  .stat-banner-value { font-size: 28px; font-weight: 800; }
+  .stat-banner-sub { font-size: 11px; color: var(--text-muted); }
+  .summary-grid { display: grid; grid-template-columns: repeat(3, 1fr); gap: 8px; }
+  .summary-tile {
+    background: var(--card-bg); border: 1px solid var(--border-color);
+    border-radius: 10px; padding: 10px 8px; text-align: center;
+    display: flex; flex-direction: column; gap: 2px;
+  }
+  .summary-label { font-size: 10px; color: var(--text-muted); }
+  .summary-value { font-size: 14px; font-weight: 700; }
+  .card-list { display: flex; flex-direction: column; gap: 10px; }
+  .event-card, .product-card {
+    background: var(--card-bg); border: 1px solid var(--border-color);
+    border-radius: 12px; padding: 14px; display: flex; align-items: center; gap: 12px; cursor: pointer;
+  }
+  .event-card-main, .product-card-main { flex: 1; min-width: 0; }
+  .event-card-main h3, .product-card-main h3 {
+    font-size: 15px; margin: 0 0 4px 0; font-weight: 700;
+    white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
+  }
+  .muted { font-size: 12px; color: var(--text-muted); margin: 0; }
+  .event-card-stats, .product-card-stats {
+    font-size: 11px; color: var(--text-muted); display: flex; gap: 12px; margin-top: 6px;
+  }
+  .event-card-side, .product-card-side { display: flex; flex-direction: column; align-items: flex-end; gap: 6px; }
+  .event-revenue { font-size: 14px; font-weight: 700; }
+  .event-revenue.small { font-size: 13px; }
+  .progress-track { width: 100%; height: 6px; background: #E8DFD0; border-radius: 3px; overflow: hidden; margin-top: 6px; }
+  .progress-fill { height: 100%; border-radius: 3px; }
+  .fab {
+    position: fixed; bottom: 20px; left: 50%; transform: translateX(-50%);
+    background: #3A352F; color: #FDF5E6; border: none; border-radius: 28px;
+    padding: 12px 24px; font-size: 14px; font-weight: 700;
+    display: flex; align-items: center; gap: 8px; box-shadow: 0 4px 12px rgba(0,0,0,0.15); cursor: pointer; z-index: 9;
+  }
+  .product-hero {
+    background: var(--card-bg); border: 1px solid var(--border-color);
+    border-radius: 12px; padding: 16px; display: flex; align-items: center; gap: 16px;
+  }
+  .product-hero-text h2 { font-size: 17px; margin: 0 0 4px 0; }
+  .grid-card, .calc-card {
+    background: var(--card-bg); border: 1px solid var(--border-color);
+    border-radius: 12px; padding: 16px; display: flex; flex-direction: column; gap: 12px;
+  }
+  .section-title { font-size: 13px; font-weight: 700; margin: 0; }
+  .grid-legend { font-size: 11px; color: var(--text-muted); }
+  .cell-grid { display: grid; grid-template-columns: repeat(6, 1fr); gap: 6px; }
+  .cell-btn {
+    aspect-ratio: 1; background: #F8F2E4; border: 1.5px dashed #C8B89D;
+    border-radius: 8px; padding: 4px; display: flex; align-items: center; justify-content: center; cursor: pointer;
+  }
+  .cell-btn.cell-filled { background: #FFF9ED; border: 1.5px solid transparent; }
+  .calc-row { display: flex; align-items: center; justify-content: space-between; }
+  .calc-label { font-size: 13px; color: var(--text-muted); }
+  .stepper { display: flex; align-items: center; background: #F5EAD6; border-radius: 8px; border: 1px solid var(--border-color); }
+  .stepper-btn { background: none; border: none; padding: 6px 14px; font-size: 16px; font-weight: 700; cursor: pointer; }
+  .stepper-value { padding: 0 8px; font-size: 14px; font-weight: 700; min-width: 32px; text-align: center; }
+  .calc-subtotal { font-size: 16px; font-weight: 700; }
+  .calc-input-row { background: #F8F2E4; padding: 8px 12px; border-radius: 8px; border: 1px solid var(--border-color); }
+  .calc-input {
+    background: #FFF; border: 1px solid var(--border-color); border-radius: 6px;
+    padding: 6px 10px; font-size: 16px; width: 120px; text-align: right; outline: none;
+  }
+  .change-display {
+    background: #F5EAD6; border-radius: 8px; padding: 10px 14px;
+    display: flex; align-items: center; justify-content: space-between; border: 1px solid var(--border-color);
+  }
+  .change-warn { background: #FCE8E6; border-color: #E2A7A0; }
+  .change-warn .change-display-label, .change-warn strong { color: var(--danger); }
+  .primary-btn {
+    background: #3A352F; color: #FDF5E6; border: none; border-radius: 8px;
+    padding: 12px; font-size: 14px; font-weight: 700; width: 100%; cursor: pointer; text-align: center;
+  }
+  .primary-btn:disabled { opacity: 0.4; cursor: not-allowed; }
+  .danger-zone { display: flex; flex-direction: column; gap: 8px; margin-top: 8px; }
+  .ghost-btn {
+    background: none; border: 1px dashed var(--border-color); border-radius: 8px;
+    padding: 10px; font-size: 13px; color: var(--text-muted); cursor: pointer; width: 100%;
+    display: flex; align-items: center; justify-content: center; gap: 6px;
+  }
+  .danger-text { color: var(--danger); border-color: #E2A7A0; }
+  .icon-btn { background: none; border: none; padding: 6px; cursor: pointer; border-radius: 6px; display: flex; }
+  .icon-btn.danger { color: var(--danger); }
+  .modal-overlay {
+    position: fixed; top: 0; left: 0; right: 0; bottom: 0; background: rgba(0,0,0,0.4);
+    z-index: 100; display: flex; align-items: flex-end; justify-content: center;
+  }
+  .modal-sheet {
+    background: var(--card-bg); width: 100%; max-width: 480px;
+    border-top-left-radius: 16px; border-top-right-radius: 16px;
+    padding: 20px 16px 32px 16px; max-height: 90vh; overflow-y: auto;
+    display: flex; flex-direction: column; gap: 16px;
+  }
+  .modal-head { display: flex; align-items: center; justify-content: space-between; }
+  .modal-head h2 { font-size: 16px; margin: 0; }
+  .modal-body { display: flex; flex-direction: column; gap: 14px; }
+  .field { display: flex; flex-direction: column; gap: 6px; }
+  .field span { font-size: 12px; font-weight: 700; color: var(--text-muted); }
+  .field-input {
+    background: #FFF; border: 1px solid var(--border-color); border-radius: 8px;
+    padding: 10px 12px; font-size: 15px; outline: none; width: 100%;
+  }
+  .field-row { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; }
+  .preview-box {
+    background: #F8F2E4; border: 1px solid var(--border-color); border-radius: 10px;
+    padding: 12px; display: flex; align-items: center; gap: 12px;
+  }
+  .chips-row { display: flex; gap: 6px; flex-wrap: wrap; }
+  .chip {
+    background: #F5EAD6; border: 1px solid var(--border-color); border-radius: 6px;
+    padding: 6px 12px; font-size: 12px; font-weight: 700; color: var(--text-muted); cursor: pointer;
+  }
+  .chip.active { background: #3A352F; color: #FDF5E6; border-color: #3A352F; }
+  .color-grid { display: grid; grid-template-columns: repeat(8, 1fr); gap: 6px; }
+  .color-chip { aspect-ratio: 1; border-radius: 6px; border: 2px solid transparent; cursor: pointer; }
+  .color-chip.active { border-color: #3A352F; transform: scale(1.1); }
+  .modal-actions-split { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; }
 </style>
 </head>
 <body>
 <div id="root"></div>
 
-<script type="text/babel" data-presets="react">
-/* =========================================================================
-   在庫・売上管理アプリ（対面販売・ハンドメイド出店向け）
-   ========================================================================= */
+<script>
+// Babelを使わず、純粋なJavaScriptスクリプトとして実行します
+window.addEventListener("DOMContentLoaded", () => {
+  const { useState, useEffect, useRef, useCallback, useMemo } = React;
+  const STORAGE_KEY = "urepeta:data";
 
-const { useState, useEffect, useRef, useCallback, useMemo } = React;
+  const SHAPES = [
+    { id: "circle", label: "丸" },
+    { id: "square", label: "四角" },
+    { id: "triangle", label: "三角" },
+    { id: "star", label: "星" },
+  ];
+  const PATTERNS = [
+    { id: "solid", label: "べた塗り" },
+    { id: "diagonal", label: "斜線" },
+    { id: "dot", label: "ドット" },
+    { id: "grid", label: "格子" },
+  ];
+  const COLORS = [
+    { id: "orange", hex: "#E69F00", label: "オレンジ" },
+    { id: "skyblue", hex: "#56B4E9", label: "スカイブルー" },
+    { id: "green", hex: "#009E73", label: "グリーン" },
+    { id: "blue", hex: "#0072B2", label: "ブルー" },
+    { id: "vermillion", hex: "#D55E00", label: "バーミリオン" },
+    { id: "purple", hex: "#CC79A7", label: "パープル" },
+    { id: "yellow", hex: "#C8A400", label: "イエロー" },
+    { id: "black", hex: "#3A3A3A", label: "ブラック" },
+  ];
 
-const STORAGE_KEY = "urepeta:data";
-
-const SHAPES = [
-  { id: "circle", label: "丸" },
-  { id: "square", label: "四角" },
-  { id: "triangle", label: "三角" },
-  { id: "star", label: "星" },
-];
-
-const PATTERNS = [
-  { id: "solid", label: "べた塗り" },
-  { id: "diagonal", label: "斜線" },
-  { id: "dot", label: "ドット" },
-  { id: "grid", label: "格子" },
-];
-
-const COLORS = [
-  { id: "orange", hex: "#E69F00", label: "オレンジ" },
-  { id: "skyblue", hex: "#56B4E9", label: "スカイブルー" },
-  { id: "green", hex: "#009E73", label: "グリーン" },
-  { id: "blue", hex: "#0072B2", label: "ブルー" },
-  { id: "vermillion", hex: "#D55E00", label: "バーミリオン" },
-  { id: "purple", hex: "#CC79A7", label: "パープル" },
-  { id: "yellow", hex: "#C8A400", label: "イエロー" },
-  { id: "black", hex: "#3A3A3A", label: "ブラック" },
-];
-
-function uid(prefix = "id") {
-  return `${prefix}_${Date.now().toString(36)}_${Math.random().toString(36).slice(2, 8)}`;
-}
-
-function yen(n) {
-  const v = Number.isFinite(n) ? n : 0;
-  return `¥${v.toLocaleString("ja-JP")}`;
-}
-
-function makeCells(count) {
-  return new Array(Math.max(0, count)).fill(false);
-}
-
-function makeTimes(count) {
-  return new Array(Math.max(0, count)).fill(null);
-}
-
-function nowTimeStr() {
-  const d = new Date();
-  const pad = (n) => String(n).padStart(2, "0");
-  return `${pad(d.getHours())}:${pad(d.getMinutes())}:${pad(d.getSeconds())}`;
-}
-
-function csvEscape(value) {
-  const str = String(value ?? "");
-  if (/[",\n]/.test(str)) {
-    return `"${str.replace(/"/g, '""')}"`;
+  function uid(prefix = "id") {
+    return prefix + "_" + Date.now().toString(36) + "_" + Math.random().toString(36).slice(2, 8);
   }
-  return str;
-}
+  function yen(n) {
+    const v = Number.isFinite(n) ? n : 0;
+    return "¥" + v.toLocaleString("ja-JP");
+  }
+  function makeCells(count) { return new Array(Math.max(0, count)).fill(false); }
+  function makeTimes(count) { return new Array(Math.max(0, count)).fill(null); }
+  function nowTimeStr() {
+    const d = new Date();
+    const pad = (n) => String(n).padStart(2, "0");
+    return pad(d.getHours()) + ":" + pad(d.getMinutes()) + ":" + pad(d.getSeconds());
+  }
 
-function downloadCsv(filename, rows) {
-  const csvBody = rows.map((row) => row.map(csvEscape).join(",")).join("\r\n");
-  const csvContent = "\uFEFF" + csvBody;
-  const blob = new Blob([csvContent], { type: "text/csv;charset=utf-8;" });
-  const url = URL.createObjectURL(blob);
-  const link = document.createElement("a");
-  link.href = url;
-  link.download = filename;
-  document.body.appendChild(link);
-  link.click();
-  document.body.removeChild(link);
-  setTimeout(() => URL.revokeObjectURL(url), 1000);
-}
+  function Seal({ shape, color, pattern, filled, size = 34, dim = false }) {
+    const patId = "pat_" + shape + "_" + pattern + "_" + color.replace("#", "");
+    const strokeColor = filled ? color : "#7A6340";
+    const fillValue = filled ? (pattern === "solid" ? color : "url(#" + patId + ")") : "none";
+    const opacity = dim ? 0.45 : 1;
 
-function defaultProduct(overrides = {}) {
-  const usedColorIdx = overrides._colorIdx ?? 0;
-  const stock = overrides.stock ?? 30;
-  return {
-    id: uid("prod"),
-    name: "",
-    price: 500,
-    stock,
-    cells: makeCells(stock),
-    cellTimes: makeTimes(stock),
-    shape: SHAPES[usedColorIdx % SHAPES.length].id,
-    color: COLORS[usedColorIdx % COLORS.length].hex,
-    pattern: PATTERNS[0].id,
-    ...overrides,
-  };
-}
-
-function defaultEvent(overrides = {}) {
-  return {
-    id: uid("evt"),
-    name: "",
-    date: "",
-    venue: "",
-    products: [],
-    ...overrides,
-  };
-}
-
-/* ---------------------------- Seal (SVG) -------------------------------- */
-
-function Seal({ shape, color, pattern, filled, size = 34, dim = false }) {
-  const patId = `pat_${shape}_${pattern}_${color.replace("#", "")}`;
-  const strokeColor = filled ? color : "#7A6340";
-  const fillValue = filled ? (pattern === "solid" ? color : `url(#${patId})`) : "none";
-
-  const shapeProps = {
-    fill: fillValue,
-    stroke: strokeColor,
-    strokeWidth: 2,
-    strokeDasharray: filled ? "none" : "3.2 3.2",
-    opacity: dim ? 0.45 : 1,
-  };
-
-  return (
-    <svg width={size} height={size} viewBox="0 0 40 40" style={{ overflow: "visible" }}>
-      <defs>
-        <pattern id={patId} width="7" height="7" patternUnits="userSpaceOnUse" patternTransform="rotate(45)">
-          <rect width="7" height="7" fill="#FBF5E9" />
-          {pattern === "diagonal" && <rect x="0" y="0" width="3" height="7" fill={color} />}
-          {pattern === "dot" && <circle cx="3.5" cy="3.5" r="2" fill={color} />}
-          {pattern === "grid" && (
-            <>
-              <rect x="0" y="0" width="7" height="2" fill={color} />
-              <rect x="0" y="0" width="2" height="7" fill={color} />
-            </>
-          )}
-        </pattern>
-      </defs>
-      {shape === "circle" && <circle cx="20" cy="20" r="16" fill={shapeProps.fill} stroke={shapeProps.stroke} strokeWidth={shapeProps.strokeWidth} strokeDasharray={shapeProps.strokeDasharray} opacity={shapeProps.opacity} />}
-      {shape === "square" && <rect x="5" y="5" width="30" height="30" rx="6" fill={shapeProps.fill} stroke={shapeProps.stroke} strokeWidth={shapeProps.strokeWidth} strokeDasharray={shapeProps.strokeDasharray} opacity={shapeProps.opacity} />}
-      {shape === "triangle" && <polygon points="20,4 36,33 4,33" strokeLinejoin="round" fill={shapeProps.fill} stroke={shapeProps.stroke} strokeWidth={shapeProps.strokeWidth} strokeDasharray={shapeProps.strokeDasharray} opacity={shapeProps.opacity} />}
-      {shape === "star" && (
-        <polygon
-          points="20,3 23.6,14.6 36,14.6 26.1,21.9 29.7,33.6 20,26.2 10.3,33.6 13.9,21.9 4,14.6 16.4,14.6"
-          strokeLinejoin="round"
-          fill={shapeProps.fill}
-          stroke={shapeProps.stroke}
-          strokeWidth={shapeProps.strokeWidth}
-          strokeDasharray={shapeProps.strokeDasharray}
-          opacity={shapeProps.opacity}
-        />
-      )}
-    </svg>
-  );
-}
-
-/* ------------------------------- App ------------------------------------ */
-
-function App() {
-  const [events, setEvents] = useState([]);
-  const [loaded, setLoaded] = useState(false);
-  const [view, setView] = useState("events");
-  const [currentEventId, setCurrentEventId] = useState(null);
-  const [currentProductId, setCurrentProductId] = useState(null);
-
-  const [showAddEvent, setShowAddEvent] = useState(false);
-  const [showAddProduct, setShowAddProduct] = useState(false);
-  const [confirmDialog, setConfirmDialog] = useState(null);
-
-  const saveTimer = useRef(null);
-
-  useEffect(() => {
-    try {
-      const raw = localStorage.getItem(STORAGE_KEY);
-      if (raw) {
-        const parsed = JSON.parse(raw);
-        if (parsed && Array.isArray(parsed.events)) setEvents(parsed.events);
-      }
-    } catch (e) {
-      // ignore
-    } finally {
-      setLoaded(true);
+    let shapeEl = null;
+    if (shape === "circle") {
+      shapeEl = React.createElement("circle", { cx: 20, cy: 20, r: 16, fill: fillValue, stroke: strokeColor, strokeWidth: 2, strokeDasharray: filled ? "none" : "3.2 3.2", opacity });
+    } else if (shape === "square") {
+      shapeEl = React.createElement("rect", { x: 5, y: 5, width: 30, height: 30, rx: 6, fill: fillValue, stroke: strokeColor, strokeWidth: 2, strokeDasharray: filled ? "none" : "3.2 3.2", opacity });
+    } else if (shape === "triangle") {
+      shapeEl = React.createElement("polygon", { points: "20,4 36,33 4,33", strokeLinejoin: "round", fill: fillValue, stroke: strokeColor, strokeWidth: 2, strokeDasharray: filled ? "none" : "3.2 3.2", opacity });
+    } else if (shape === "star") {
+      shapeEl = React.createElement("polygon", { points: "20,3 23.6,14.6 36,14.6 26.1,21.9 29.7,33.6 20,26.2 10.3,33.6 13.9,21.9 4,14.6 16.4,14.6", strokeLinejoin: "round", fill: fillValue, stroke: strokeColor, strokeWidth: 2, strokeDasharray: filled ? "none" : "3.2 3.2", opacity });
     }
-  }, []);
 
-  useEffect(() => {
-    if (!loaded) return;
-    if (saveTimer.current) clearTimeout(saveTimer.current);
-    saveTimer.current = setTimeout(() => {
+    const defs = React.createElement("defs", null,
+      React.createElement("pattern", { id: patId, width: 7, height: 7, patternUnits: userSpaceOnUse="userSpaceOnUse", patternTransform: "rotate(45)" },
+        React.createElement("rect", { width: 7, height: 7, fill: "#FBF5E9" }),
+        pattern === "diagonal" && React.createElement("rect", { x: 0, y: 0, width: 3, height: 7, fill: color }),
+        pattern === "dot" && React.createElement("circle", { cx: 3.5, cy: 3.5, r: 2, fill: color }),
+        pattern === "grid" && React.createElement(React.Fragment, null,
+          React.createElement("rect", { x: 0, y: 0, width: 7, height: 2, fill: color }),
+          React.createElement("rect", { x: 0, y: 0, width: 2, height: 7, fill: color })
+        )
+      )
+    );
+
+    return React.createElement("svg", { width: size, height: size, viewBox: "0 0 40 40", style: { overflow: "visible" } }, defs, shapeEl);
+  }
+
+  function App() {
+    const [events, setEvents] = useState([]);
+    const [loaded, setLoaded] = useState(false);
+    const [view, setView] = useState("events");
+    const [currentEventId, setCurrentEventId] = useState(null);
+    const [currentProductId, setCurrentProductId] = useState(null);
+
+    const [showAddEvent, setShowAddEvent] = useState(false);
+    const [showAddProduct, setShowAddProduct] = useState(false);
+    const [confirmDialog, setConfirmDialog] = useState(null);
+
+    useEffect(() => {
+      try {
+        const raw = localStorage.getItem(STORAGE_KEY);
+        if (raw) {
+          const parsed = JSON.parse(raw);
+          if (parsed && Array.isArray(parsed.events)) setEvents(parsed.events);
+        }
+      } catch (e) {}
+      setLoaded(true);
+    }, []);
+
+    useEffect(() => {
+      if (!loaded) return;
       try {
         localStorage.setItem(STORAGE_KEY, JSON.stringify({ events }));
-      } catch (e) {
-        console.error("save failed", e);
-      }
-    }, 400);
-    return () => clearTimeout(saveTimer.current);
-  }, [events, loaded]);
+      } catch (e) {}
+    }, [events, loaded]);
 
-  const currentEvent = useMemo(
-    () => events.find((e) => e.id === currentEventId) || null,
-    [events, currentEventId]
-  );
-  const currentProduct = useMemo(
-    () => (currentEvent ? currentEvent.products.find((p) => p.id === currentProductId) : null) || null,
-    [currentEvent, currentProductId]
-  );
+    const currentEvent = useMemo(() => events.find((e) => e.id === currentEventId) || null, [events, currentEventId]);
+    const currentProduct = useMemo(() => (currentEvent ? currentEvent.products.find((p) => p.id === currentProductId) : null) || null, [currentEvent, currentProductId]);
 
-  const updateEvent = useCallback((eventId, updater) => {
-    setEvents((prev) => prev.map((e) => (e.id === eventId ? updater(e) : e)));
-  }, []);
-
-  const updateProduct = useCallback(
-    (eventId, productId, updater) => {
-      updateEvent(eventId, (e) => ({
-        ...e,
-        products: e.products.map((p) => (p.id === productId ? updater(p) : p)),
-      }));
-    },
-    [updateEvent]
-  );
-
-  function goEvents() {
-    setView("events");
-    setCurrentEventId(null);
-    setCurrentProductId(null);
-  }
-  function openEvent(id) {
-    setCurrentEventId(id);
-    setView("event");
-    setCurrentProductId(null);
-  }
-  function openProduct(id) {
-    setCurrentProductId(id);
-    setView("product");
-  }
-  function backFromProduct() {
-    setView("event");
-    setCurrentProductId(null);
-  }
-
-  function addEvent(data) {
-    const ev = defaultEvent(data);
-    setEvents((prev) => [ev, ...prev]);
-    setShowAddEvent(false);
-    openEvent(ev.id);
-  }
-
-  function addProduct(data) {
-    const idx = currentEvent ? currentEvent.products.length : 0;
-    const prod = defaultProduct({ ...data, _colorIdx: idx });
-    updateEvent(currentEvent.id, (e) => ({ ...e, products: [...e.products, prod] }));
-    setShowAddProduct(false);
-  }
-
-  function deleteEvent(id) {
-    setConfirmDialog({
-      title: "イベントを削除",
-      message: "このイベントと、登録されている商品・記録がすべて削除されます。よろしいですか？",
-      danger: true,
-      onConfirm: () => {
-        setEvents((prev) => prev.filter((e) => e.id !== id));
-        if (currentEventId === id) goEvents();
-        setConfirmDialog(null);
-      },
-    });
-  }
-
-  function deleteProduct(eventId, productId) {
-    setConfirmDialog({
-      title: "商品を削除",
-      message: "この商品の在庫・販売記録が削除されます。よろしいですか？",
-      danger: true,
-      onConfirm: () => {
-        updateEvent(eventId, (e) => ({ ...e, products: e.products.filter((p) => p.id !== productId) }));
-        setConfirmDialog(null);
-        if (currentProductId === productId) backFromProduct();
-      },
-    });
-  }
-
-  function resetProductSales(eventId, productId) {
-    setConfirmDialog({
-      title: "販売記録をリセット",
-      message: "この商品のシール（販売記録）をすべて未販売の状態に戻します。よろしいですか？",
-      danger: true,
-      onConfirm: () => {
-        updateProduct(eventId, productId, (p) => ({ ...p, cells: makeCells(p.stock), cellTimes: makeTimes(p.stock) }));
-        setConfirmDialog(null);
-      },
-    });
+    return React.createElement("div", { className: "app-root" },
+      React.createElement("header", { className: "header" },
+        React.createElement("div", { className: "header-row" },
+          view !== "events" ? React.createElement("button", { className: "icon-btn", onClick: () => { setView(view === "product" ? "event" : "events"); if(view==="event") setCurrentEventId(null); if(view==="product") setCurrentProductId(null); } }, "←") :
+          React.createElement("div", { className: "header-mark" }, "⭐"),
+          React.createElement("div", { className: "header-text" },
+            React.createElement("h1", null, view === "events" ? "うれペタ" : view === "event" ? (currentEvent?.name || "イベント") : (currentProduct?.name || "商品")),
+            React.createElement("p", null, view === "events" ? "うれたらペタッとうれしいアプリ" : "管理画面")
+          )
+        )
+      ),
+      React.createElement("main", { className: "main" },
+        view === "events" && React.createElement("div", { className: "view-pad" },
+          events.length === 0 ? React.createElement("div", { style: { textAlign: "center", padding: "40px 0" } },
+            React.createElement("h3", null, "まだイベントがありません"),
+            React.createElement("p", { className: "muted" }, "下のボタンからイベントを作成してください")
+          ) : React.createElement("div", { className: "card-list" },
+            events.map((e) => React.createElement("div", { key: e.id, className: "event-card", onClick: () => { setCurrentEventId(e.id); setView("event"); } },
+              React.createElement("div", { className: "event-card-main" },
+                React.createElement("h3", null, e.name || "無題のイベント"),
+                React.createElement("p", { className: "muted" }, e.date || "日付未設定")
+              )
+            ))
+          ),
+          React.createElement("button", { className: "fab", onClick: () => setShowAddEvent(true) }, "+ 新しいイベントを作成")
+        ),
+        view === "event" && currentEvent && React.createElement("div", { className: "view-pad" },
+          React.createElement("h2", null, currentEvent.name),
+          currentEvent.products.length === 0 ? React.createElement("p", { className: "muted" }, "商品がありません") :
+          currentEvent.products.map((p) => React.createElement("div", { key: p.id, className: "product-card", onClick: () => { setCurrentProductId(p.id); setView("product"); } },
+            React.createElement("div", { className: "product-card-main" },
+              React.createElement("h3", null, p.name),
+              React.createElement("p", { className: "muted" }, "価格: " + yen(p.price))
+            )
+          )),
+          React.createElement("button", { className: "fab", onClick: () => setShowAddProduct(true) }, "+ 商品を追加")
+        ),
+        view === "product" && currentProduct && React.createElement("div", { className: "view-pad" },
+          React.createElement("h2", null, currentProduct.name),
+          React.createElement("p", null, "価格: " + yen(currentProduct.price)),
+          React.createElement("button", { className: "ghost-btn", onClick: () => { setView("event"); setCurrentProductId(null); } }, "イベントに戻る")
+        )
+      ),
+      showAddEvent && React.createElement("div", { className: "modal-overlay", onClick: () => setShowAddEvent(false) },
+        React.createElement("div", { className: "modal-sheet", onClick: (e) => e.stopPropagation() },
+          React.createElement("div", { className: "modal-head" },
+            React.createElement("h2", null, "イベント作成"),
+            React.createElement("button", { className: "icon-btn", onClick: () => setShowAddEvent(false) }, "✕")
+          ),
+          React.createElement("div", { className: "modal-body" },
+            React.createElement("label", { className: "field" },
+              React.createElement("span", null, "イベント名"),
+              React.createElement("input", { id: "evNameInput", className: "field-input", placeholder: "例）コミックマーケット105", autoFocus: true })
+            ),
+            React.createElement("button", { className: "primary-btn", onClick: () => {
+              const val = document.getElementById("evNameInput").value;
+              const newEv = { id: uid("evt"), name: val, products: [] };
+              setEvents([newEv, ...events]);
+              setShowAddEvent(false);
+              setCurrentEventId(newEv.id);
+              setView("event");
+            }}, "作成する")
+          )
+        )
+      ),
+      showAddProduct && currentEvent && React.createElement("div", { className: "modal-overlay", onClick: () => setShowAddProduct(false) },
+        React.createElement("div", { className: "modal-sheet", onClick: (e) => e.stopPropagation() },
+          React.createElement("div", { className: "modal-head" },
+            React.createElement("h2", null, "商品追加"),
+            React.createElement("button", { className: "icon-btn", onClick: () => setShowAddProduct(false) }, "✕")
+          ),
+          React.createElement("div", { className: "modal-body" },
+            React.createElement("label", { className: "field" },
+              React.createElement("span", null, "商品名"),
+              React.createElement("input", { id: "prodNameInput", className: "field-input", placeholder: "例）新刊", autoFocus: true })
+            ),
+            React.createElement("button", { className: "primary-btn", onClick: () => {
+              const val = document.getElementById("prodNameInput").value;
+              const newProd = { id: uid("prod"), name: val, price: 500, stock: 30, cells: makeCells(30) };
+              setEvents(events.map(e => e.id === currentEvent.id ? { ...e, products: [...e.products, newProd] } : e));
+              setShowAddProduct(false);
+            }}, "追加する")
+          )
+        )
+      )
+    );
   }
 
-  function toggleCell(eventId, productId, index) {
-    updateProduct(eventId, productId, (p) => {
-      const cells = p.cells.slice();
-      const cellTimes = (p.cellTimes && p.cellTimes.length === p.cells.length
-        ? p.cellTimes
-        : makeTimes(p.cells.length)
-      ).slice();
-      const newValue = !cells[index];
-      cells[index] = newValue;
-      cellTimes[index] = newValue ? nowTimeStr() : null;
-      return { ...p, cells, cellTimes };
-    });
-  }
-
-  function sellQty(eventId, productId, qty) {
-    updateProduct(eventId, productId, (p) => {
-      const cells = p.cells.slice();
-      const cellTimes = (p.cellTimes && p.cellTimes.length === p.cells.length
-        ? p.cellTimes
-        : makeTimes(p.cells.length)
-      ).slice();
-      let remaining = qty;
-      const time = nowTimeStr();
-      for (let i = 0; i < cells.length && remaining > 0; i++) {
-        if (!cells[i]) {
-          cells[i] = true;
-          cellTimes[i] = time;
-          remaining--;
-        }
-      }
-      return { ...p, cells, cellTimes };
-    });
-  }
-
-  function addStock(eventId, productId, amount) {
-    updateProduct(eventId, productId, (p) => ({
-      ...p,
-      stock: p.stock + amount,
-      cells: [...p.cells, ...makeCells(amount)],
-      cellTimes: [...(p.cellTimes || makeTimes(p.cells.length)), ...makeTimes(amount)],
-    }));
-  }
-
-  return (
-    <div className="app-root">
-      <GlobalStyle />
-      <Header
-        view={view}
-        eventName={currentEvent?.name}
-        productName={currentProduct?.name}
-        onBackToEvents={goEvents}
-        onBackToEvent={backFromProduct}
-      />
-
-      <main className="main">
-        {view === "events" && (
-          <EventsListView
-            events={events}
-            onOpen={openEvent}
-            onAdd={() => setShowAddEvent(true)}
-            onDelete={deleteEvent}
-          />
-        )}
-
-        {view === "event" && currentEvent && (
-          <EventDetailView
-            event={currentEvent}
-            onOpenProduct={openProduct}
-            onAddProduct={() => setShowAddProduct(true)}
-            onDeleteProduct={(pid) => deleteProduct(currentEvent.id, pid)}
-          />
-        )}
-
-        {view === "product" && currentEvent && currentProduct && (
-          <ProductDetailView
-            event={currentEvent}
-            product={currentProduct}
-            onToggleCell={(idx) => toggleCell(currentEvent.id, currentProduct.id, idx)}
-            onSell={(qty) => sellQty(currentEvent.id, currentProduct.id, qty)}
-            onAddStock={(amt) => addStock(currentEvent.id, currentProduct.id, amt)}
-            onReset={() => resetProductSales(currentEvent.id, currentProduct.id)}
-            onDelete={() => deleteProduct(currentEvent.id, currentProduct.id)}
-          />
-        )}
-      </main>
-
-      {showAddEvent && (
-        <AddEventModal onCancel={() => setShowAddEvent(false)} onSubmit={addEvent} />
-      )}
-      {showAddProduct && currentEvent && (
-        <AddProductModal onCancel={() => setShowAddProduct(false)} onSubmit={addProduct} />
-      )}
-      {confirmDialog && (
-        <ConfirmModal
-          {...confirmDialog}
-          onCancel={() => setConfirmDialog(null)}
-        />
-      )}
-    </div>
-  );
-}
-
-/* ------------------------------- Header ---------------------------------- */
-
-function Header({ view, eventName, productName, onBackToEvents, onBackToEvent }) {
-  let title = "うれペタ";
-  let subtitle = "うれたらペタッとうれしいアプリ";
-  let onBack = null;
-
-  if (view === "event") {
-    title = eventName || "無題のイベント";
-    subtitle = "イベント詳細・集計";
-    onBack = onBackToEvents;
-  } else if (view === "product") {
-    title = productName || "無題の商品";
-    subtitle = "在庫マス目・おつり計算";
-    onBack = onBackToEvent;
-  }
-
-  return (
-    <header className="header">
-      <div className="header-row">
-        {onBack ? (
-          <button className="icon-btn" onClick={onBack} aria-label="戻る">
-            <svg width="22" height="22" viewBox="0 0 24 24" fill="none">
-              <path d="M15 5l-7 7 7 7" stroke="currentColor" strokeWidth="2.4" strokeLinecap="round" strokeLinejoin="round" />
-            </svg>
-          </button>
-        ) : (
-          <div className="header-mark">
-            <Seal shape="star" color="#C8A400" pattern="solid" filled size={26} />
-          </div>
-        )}
-        <div className="header-text">
-          <h1>{title}</h1>
-          <p>{subtitle}</p>
-        </div>
-      </div>
-    </header>
-  );
-}
-
-/* --------------------------- Events List View ----------------------------- */
-
-function EventsListView({ events, onOpen, onAdd, onDelete }) {
-  const grandTotal = events.reduce(
-    (sum, e) => sum + e.products.reduce((s, p) => s + p.cells.filter(Boolean).length * p.price, 0),
-    0
-  );
-  const grandSold = events.reduce(
-    (sum, e) => sum + e.products.reduce((s, p) => s + p.cells.filter(Boolean).length, 0),
-    0
-  );
-  const grandStock = events.reduce(
-    (sum, e) => sum + e.products.reduce((s, p) => s + p.stock, 0),
-    0
-  );
-  const grandRemaining = grandStock - grandSold;
-  const eventCount = events.length;
-  const productCount = events.reduce((sum, e) => sum + e.products.length, 0);
-
-  function handleExportCsv() {
-    const rows = [["イベント名", "商品名", "単価", "販売時刻"]];
-    events.forEach((e) => {
-      e.products.forEach((p) => {
-        p.cells.forEach((filled, i) => {
-          if (filled) {
-            const time = (p.cellTimes && p.cellTimes[i]) || "";
-            rows.push([e.name || "無題のイベント", p.name || "無題の商品", p.price, time]);
-          }
-        });
-      });
-    });
-    if (rows.length === 1) {
-      rows.push(["（まだ販売記録がありません）", "", "", ""]);
-    }
-    const stamp = nowTimeStr().replace(/:/g, "");
-    downloadCsv(`urepeta_sales_${stamp}.csv`, rows);
-  }
-
-  return (
-    <div className="view-pad">
-      {events.length > 0 && (
-        <>
-          <div className="stat-banner">
-            <span className="stat-banner-label">これまでの総売上</span>
-            <span className="stat-banner-value">{yen(grandTotal)}</span>
-            <span className="stat-banner-sub">
-              全 {eventCount} イベント・{productCount} 商品を集計
-            </span>
-          </div>
-          <div className="summary-grid">
-            <SummaryTile label="総販売数" value={`${grandSold} 点`} accent="indigo" />
-            <SummaryTile label="残り在庫" value={`${grandRemaining} 点`} accent="plum" />
-            <SummaryTile label="開催イベント数" value={`${eventCount} 件`} accent="gold" />
-          </div>
-          <button className="ghost-btn csv-btn" onClick={handleExportCsv}>
-            <CsvIcon /> 売上データをCSV出力
-          </button>
-        </>
-      )}
-
-      {events.length === 0 ? (
-        <EmptyState
-          icon="star"
-          title="まだイベントがありません"
-          body="「新しいイベントを作成」から、出店イベントごとのページを作ってみましょう。"
-        />
-      ) : (
-        <div className="card-list">
-          {events.map((e) => {
-            const sold = e.products.reduce((s, p) => s + p.cells.filter(Boolean).length, 0);
-            const stock = e.products.reduce((s, p) => s + p.stock, 0);
-            const revenue = e.products.reduce(
-              (s, p) => s + p.cells.filter(Boolean).length * p.price,
-              0
-            );
-            return (
-              <div key={e.id} className="event-card" onClick={() => onOpen(e.id)}>
-                <div className="event-card-main">
-                  <h3>{e.name || "無題のイベント"}</h3>
-                  <p className="muted">
-                    {[e.date, e.venue].filter(Boolean).join(" ・ ") || "日付・会場未設定"}
-                  </p>
-                  <div className="event-card-stats">
-                    <span>商品 {e.products.length}種</span>
-                    <span>販売 {sold}/{stock}</span>
-                  </div>
-                </div>
-                <div className="event-card-side">
-                  <span className="event-revenue">{yen(revenue)}</span>
-                  <button
-                    className="icon-btn danger"
-                    aria-label="イベントを削除"
-                    onClick={(ev) => {
-                      ev.stopPropagation();
-                      onDelete(e.id);
-                    }}
-                  >
-                    <TrashIcon />
-                  </button>
-                </div>
-              </div>
-            );
-          })}
-        </div>
-      )}
-
-      <button className="fab" onClick={onAdd}>
-        <PlusIcon /> 新しいイベントを作成
-      </button>
-    </div>
-  );
-}
-
-/* --------------------------- Event Detail View ---------------------------- */
-
-function EventDetailView({ event, onOpenProduct, onAddProduct, onDeleteProduct }) {
-  const totalSold = event.products.reduce((s, p) => s + p.cells.filter(Boolean).length, 0);
-  const totalStock = event.products.reduce((s, p) => s + p.stock, 0);
-  const totalRevenue = event.products.reduce(
-    (s, p) => s + p.cells.filter(Boolean).length * p.price,
-    0
-  );
-
-  return (
-    <div className="view-pad">
-      <div className="summary-grid">
-        <SummaryTile label="総売上" value={yen(totalRevenue)} accent="gold" />
-        <SummaryTile label="販売数" value={`${totalSold} 点`} accent="indigo" />
-        <SummaryTile label="残り在庫" value={`${totalStock - totalSold} 点`} accent="plum" />
-      </div>
-
-      {event.products.length === 0 ? (
-        <EmptyState
-          icon="square"
-          title="商品がまだ登録されていません"
-          body="「商品を追加」から、頒布する本やグッズを登録しましょう。"
-        />
-      ) : (
-        <div className="card-list">
-          {event.products.map((p) => {
-            const sold = p.cells.filter(Boolean).length;
-            const remaining = p.stock - sold;
-            const pct = p.stock > 0 ? Math.round((sold / p.stock) * 100) : 0;
-            return (
-              <div key={p.id} className="product-card" onClick={() => onOpenProduct(p.id)}>
-                <Seal shape={p.shape} color={p.color} pattern={p.pattern} filled size={38} />
-                <div className="product-card-main">
-                  <h3>{p.name || "無題の商品"}</h3>
-                  <p className="muted">{yen(p.price)} ／点</p>
-                  <div className="progress-track">
-                    <div
-                      className="progress-fill"
-                      style={{ width: `${pct}%`, background: p.color }}
-                    />
-                  </div>
-                  <div className="product-card-stats">
-                    <span>残り {remaining}</span>
-                    <span>販売 {sold}/{p.stock}</span>
-                  </div>
-                </div>
-                <div className="product-card-side">
-                  <span className="event-revenue small">{yen(sold * p.price)}</span>
-                  <button
-                    className="icon-btn danger"
-                    aria-label="商品を削除"
-                    onClick={(ev) => {
-                      ev.stopPropagation();
-                      onDeleteProduct(p.id);
-                    }}
-                  >
-                    <TrashIcon />
-                  </button>
-                </div>
-              </div>
-            );
-          })}
-        </div>
-      )}
-
-      <button className="fab" onClick={onAddProduct}>
-        <PlusIcon /> 商品を追加
-      </button>
-    </div>
-  );
-}
-
-/* -------------------------- Product Detail View ---------------------------- */
-
-function ProductDetailView({ event, product, onToggleCell, onSell, onAddStock, onReset, onDelete }) {
-  const sold = product.cells.filter(Boolean).length;
-  const remaining = product.stock - sold;
-  const revenue = sold * product.price;
-
-  const [qty, setQty] = useState(1);
-  const [received, setReceived] = useState("");
-
-  useEffect(() => {
-    if (qty > Math.max(remaining, 1)) setQty(Math.max(1, remaining));
-  }, [remaining]);
-
-  const subtotal = qty * product.price;
-  const receivedNum = received === "" ? null : Number(received);
-  const change = receivedNum !== null && !Number.isNaN(receivedNum) ? receivedNum - subtotal : null;
-  const insufficient = change !== null && change < 0;
-
-  function confirmSale() {
-    if (qty < 1 || qty > remaining) return;
-    onSell(qty);
-    setReceived("");
-    setQty(1);
-  }
-
-  return (
-    <div className="view-pad">
-      <div className="product-hero">
-        <Seal shape={product.shape} color={product.color} pattern={product.pattern} filled size={54} />
-        <div className="product-hero-text">
-          <h2>{product.name || "無題の商品"}</h2>
-          <p className="muted">{yen(product.price)} ／点・全 {product.stock} 点</p>
-        </div>
-      </div>
-
-      <div className="summary-grid">
-        <SummaryTile label="売上" value={yen(revenue)} accent="gold" />
-        <SummaryTile label="販売数" value={`${sold} 点`} accent="indigo" />
-        <SummaryTile label="残り" value={`${remaining} 点`} accent="plum" />
-      </div>
-
-      <section className="grid-card">
-        <div className="grid-card-head">
-          <h3 className="section-title" style={{ margin: 0 }}>在庫マス目（タップで記録／取消）</h3>
-          <span className="grid-legend">■塗りつぶし＝販売済み □枠のみ＝在庫あり</span>
-        </div>
-        <div className="cell-grid">
-          {product.cells.map((filled, i) => (
-            <button
-              key={i}
-              className={`cell-btn ${filled ? "cell-filled" : ""}`}
-              onClick={() => onToggleCell(i)}
-              aria-pressed={filled}
-              aria-label={`${i + 1}番目 ${filled ? "販売済み・タップで取消" : "在庫あり・タップで販売記録"}`}
-            >
-              <Seal shape={product.shape} color={product.color} pattern={product.pattern} filled={filled} size="100%" />
-            </button>
-          ))}
-        </div>
-      </section>
-
-      <section className="calc-card">
-        <h3 className="section-title">会計・おつり計算</h3>
-
-        <div className="calc-row">
-          <span className="calc-label">数量</span>
-          <div className="stepper">
-            <button
-              className="stepper-btn"
-              onClick={() => setQty((q) => Math.max(1, q - 1))}
-              aria-label="数量を減らす"
-            >
-              −
-            </button>
-            <span className="stepper-value">{qty}</span>
-            <button
-              className="stepper-btn"
-              onClick={() => setQty((q) => Math.min(Math.max(remaining, 1), q + 1))}
-              aria-label="数量を増やす"
-            >
-              ＋
-            </button>
-          </div>
-        </div>
-
-        <div className="calc-row">
-          <span className="calc-label">小計</span>
-          <span className="calc-subtotal">{yen(subtotal)}</span>
-        </div>
-
-        <label className="calc-row calc-input-row">
-          <span className="calc-label">お預かり金額</span>
-          <input
-            type="number"
-            inputMode="numeric"
-            placeholder="例）1000"
-            value={received}
-            onChange={(e) => setReceived(e.target.value)}
-            className="calc-input"
-          />
-        </label>
-
-        <div className={`change-display ${insufficient ? "change-warn" : ""}`}>
-          <span className="change-display-label">
-            {insufficient ? <WarnIcon /> : <CheckIcon />}
-            おつり
-          </span>
-          <strong>{change === null ? "―" : insufficient ? "金額不足" : yen(change)}</strong>
-        </div>
-
-        <button
-          className="primary-btn"
-          disabled={remaining <= 0 || qty > remaining}
-          onClick={confirmSale}
-        >
-          {remaining <= 0 ? "在庫切れです" : `${qty}点の販売を記録してシールを貼る`}
-        </button>
-      </section>
-
-      <section className="danger-zone">
-        <button className="ghost-btn" onClick={() => onAddStock(10)}>在庫を＋10部 追加する</button>
-        <button className="ghost-btn" onClick={onReset}>販売記録をリセット</button>
-        <button className="ghost-btn danger-text" onClick={onDelete}>この商品を削除</button>
-      </section>
-    </div>
-  );
-}
-
-/* --------------------------- Shared small parts --------------------------- */
-
-function SummaryTile({ label, value, accent }) {
-  return (
-    <div className={`summary-tile accent-${accent}`}>
-      <span className="summary-label">{label}</span>
-      <span className="summary-value">{value}</span>
-    </div>
-  );
-}
-
-function EmptyState({ title, body }) {
-  return (
-    <div className="empty-state">
-      <Seal shape="square" color="#7A6340" pattern="none" filled={false} size={48} />
-      <h3>{title}</h3>
-      <p>{body}</p>
-    </div>
-  );
-}
-
-function PlusIcon() {
-  return (
-    <svg width="18" height="18" viewBox="0 0 24 24" fill="none">
-      <path d="M12 5v14M5 12h14" stroke="currentColor" strokeWidth="2.4" strokeLinecap="round" />
-    </svg>
-  );
-}
-function TrashIcon() {
-  return (
-    <svg width="18" height="18" viewBox="0 0 24 24" fill="none">
-      <path
-        d="M4 7h16M9 7V5a1 1 0 011-1h4a1 1 0 011 1v2m-8 0v12a1 1 0 001 1h6a1 1 0 001-1V7"
-        stroke="currentColor"
-        strokeWidth="2"
-        strokeLinecap="round"
-        strokeLinejoin="round"
-      />
-    </svg>
-  );
-}
-function CsvIcon() {
-  return (
-    <svg width="17" height="17" viewBox="0 0 24 24" fill="none">
-      <path
-        d="M6 3h9l5 5v13a1 1 0 01-1 1H6a1 1 0 01-1-1V4a1 1 0 011-1z"
-        stroke="currentColor"
-        strokeWidth="2"
-        strokeLinejoin="round"
-      />
-      <path d="M14 3v5h5" stroke="currentColor" strokeWidth="2" strokeLinejoin="round" />
-      <path d="M8 13v5M12 13v5M16 13v5" stroke="currentColor" strokeWidth="2" strokeLinecap="round" />
-    </svg>
-  );
-}
-function WarnIcon() {
-  return (
-    <svg width="15" height="15" viewBox="0 0 24 24" fill="none" style={{ flexShrink: 0 }}>
-      <path
-        d="M12 3.5l10 17.5H2L12 3.5z"
-        stroke="currentColor"
-        strokeWidth="2"
-        strokeLinejoin="round"
-      />
-      <path d="M12 10v4.5" stroke="currentColor" strokeWidth="2" strokeLinecap="round" />
-      <circle cx="12" cy="17.3" r="1.1" fill="currentColor" />
-    </svg>
-  );
-}
-function CheckIcon() {
-  return (
-    <svg width="15" height="15" viewBox="0 0 24 24" fill="none" style={{ flexShrink: 0 }}>
-      <circle cx="12" cy="12" r="9.5" stroke="currentColor" strokeWidth="2" />
-      <path d="M8 12.5l2.7 2.7L16.5 9" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" />
-    </svg>
-  );
-}
-
-/* -------------------------------- Modals ---------------------------------- */
-
-function ModalShell({ title, onCancel, children }) {
-  return (
-    <div className="modal-overlay" onClick={onCancel}>
-      <div className="modal-sheet" onClick={(e) => e.stopPropagation()}>
-        <div className="modal-head">
-          <h2>{title}</h2>
-          <button className="icon-btn" onClick={onCancel} aria-label="閉じる">
-            <svg width="20" height="20" viewBox="0 0 24 24" fill="none">
-              <path d="M6 6l12 12M18 6L6 18" stroke="currentColor" strokeWidth="2.2" strokeLinecap="round" />
-            </svg>
-          </button>
-        </div>
-        <div className="modal-body">{children}</div>
-      </div>
-    </div>
-  );
-}
-
-function AddEventModal({ onCancel, onSubmit }) {
-  const [name, setName] = useState("");
-  const [date, setDate] = useState("");
-  const [venue, setVenue] = useState("");
-
-  return (
-    <ModalShell title="新しいイベントを作成" onCancel={onCancel}>
-      <label className="field">
-        <span>イベント名</span>
-        <input
-          className="field-input"
-          placeholder="例）コミックマーケット105"
-          value={name}
-          onChange={(e) => setName(e.target.value)}
-          autoFocus
-        />
-      </label>
-      <label className="field">
-        <span>開催日（任意）</span>
-        <input className="field-input" type="date" value={date} onChange={(e) => setDate(e.target.value)} />
-      </label>
-      <label className="field">
-        <span>会場・配置（任意）</span>
-        <input
-          className="field-input"
-          placeholder="例）東7ホール ま-12a"
-          value={venue}
-          onChange={(e) => setVenue(e.target.value)}
-        />
-      </label>
-      <div className="modal-actions">
-        <button className="primary-btn" onClick={() => onSubmit({ name, date, venue })}>
-          作成して商品登録へ
-        </button>
-      </div>
-    </ModalShell>
-  );
-}
-
-function AddProductModal({ onCancel, onSubmit }) {
-  const [name, setName] = useState("");
-  const [price, setPrice] = useState("500");
-  const [stock, setStock] = useState("30");
-  const [shape, setShape] = useState(SHAPES[0].id);
-  const [color, setColor] = useState(COLORS[0].hex);
-  const [pattern, setPattern] = useState(PATTERNS[0].id);
-
-  function handleSave() {
-    const pNum = Number(price);
-    const sNum = Number(stock);
-    onSubmit({
-      name,
-      price: Number.isFinite(pNum) && pNum >= 0 ? pNum : 500,
-      stock: Number.isFinite(sNum) && sNum > 0 ? sNum : 30,
-      shape,
-      color,
-      pattern,
-    });
-  }
-
-  return (
-    <ModalShell title="商品を追加" onCancel={onCancel}>
-      <label className="field">
-        <span>商品名・タイトル</span>
-        <input
-          className="field-input"
-          placeholder="例）新刊「〇〇の本」"
-          value={name}
-          onChange={(e) => setName(e.target.value)}
-          autoFocus
-        />
-      </label>
-
-      <div className="field-row">
-        <label className="field">
-          <span>頒布価格（円）</span>
-          <input
-            className="field-input"
-            type="number"
-            inputMode="numeric"
-            value={price}
-            onChange={(e) => setPrice(e.target.value)}
-          />
-        </label>
-        <label className="field">
-          <span>初期在庫数</span>
-          <input
-            className="field-input"
-            type="number"
-            inputMode="numeric"
-            value={stock}
-            onChange={(e) => setStock(e.target.value)}
-          />
-        </label>
-      </div>
-
-      <div className="field">
-        <span>シールの見た目（色・形・模様）</span>
-        <div className="preview-box">
-          <Seal shape={shape} color={color} pattern={pattern} filled size={52} />
-          <div className="preview-box-text">
-            <strong>{name || "無題の商品"}</strong>
-            <span>{yen(Number(price) || 0)} ／ 全 {stock} 点</span>
-          </div>
-        </div>
-      </div>
-
-      <div className="field">
-        <span className="field-label-sub">形</span>
-        <div className="chips-row">
-          {SHAPES.map((s) => (
-            <button
-              key={s.id}
-              type="button"
-              className={`chip ${shape === s.id ? "active" : ""}`}
-              onClick={() => setShape(s.id)}
-            >
-              {s.label}
-            </button>
-          ))}
-        </div>
-      </div>
-
-      <div className="field">
-        <span className="field-label-sub">カラー</span>
-        <div className="color-grid">
-          {COLORS.map((c) => (
-            <button
-              key={c.id}
-              type="button"
-              className={`color-chip ${color === c.hex ? "active" : ""}`}
-              style={{ background: c.hex }}
-              onClick={() => setColor(c.hex)}
-              aria-label={c.label}
-            />
-          ))}
-        </div>
-      </div>
-
-      <div className="field">
-        <span className="field-label-sub">模様（色覚多様性への配慮）</span>
-        <div className="chips-row">
-          {PATTERNS.map((pt) => (
-            <button
-              key={pt.id}
-              type="button"
-              className={`chip ${pattern === pt.id ? "active" : ""}`}
-              onClick={() => setPattern(pt.id)}
-            >
-              {pt.label}
-            </button>
-          ))}
-        </div>
-      </div>
-
-      <div className="modal-actions">
-        <button className="primary-btn" onClick={handleSave}>
-          この内容で追加する
-        </button>
-      </div>
-    </ModalShell>
-  );
-}
-
-function ConfirmModal({ title, message, danger, onConfirm, onCancel }) {
-  return (
-    <ModalShell title={title} onCancel={onCancel}>
-      <p style={{ marginTop: 0, lineHeight: 1.6, color: "#3A352F" }}>{message}</p>
-      <div className="modal-actions-split">
-        <button className="ghost-btn" onClick={onCancel}>
-          キャンセル
-        </button>
-        <button className={`primary-btn ${danger ? "danger-bg" : ""}`} onClick={onConfirm}>
-          実行する
-        </button>
-      </div>
-    </ModalShell>
-  );
-}
-
-/* -------------------------------- Style ----------------------------------- */
-
-function GlobalStyle() {
-  return (
-    <style>{`
-      :root {
-        --bg-color: #F2E8D6;
-        --card-bg: #FDF5E6;
-        --text-main: #3A352F;
-        --text-muted: #7A6F62;
-        --accent-gold: #C8A400;
-        --accent-indigo: #0072B2;
-        --accent-plum: #CC79A7;
-        --danger: #A3402E;
-        --border-color: #E2D4BD;
-      }
-      * { box-sizing: border-box; }
-      body {
-        font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif;
-        color: var(--text-main);
-        background: var(--bg-color);
-        margin: 0;
-        padding: 0;
-        -webkit-tap-highlight-color: transparent;
-      }
-      .app-root {
-        max-width: 480px;
-        margin: 0 auto;
-        min-height: 100vh;
-        background: var(--bg-color);
-        display: flex;
-        flex-direction: column;
-        position: relative;
-        padding-bottom: 90px;
-      }
-      .header {
-        background: var(--card-bg);
-        border-bottom: 1px solid var(--border-color);
-        position: sticky;
-        top: 0;
-        z-index: 10;
-        padding: 12px 16px;
-      }
-      .header-row {
-        display: flex;
-        align-items: center;
-        gap: 12px;
-      }
-      .header-text h1 {
-        font-size: 17px;
-        margin: 0 0 2px 0;
-        font-weight: 700;
-        color: var(--text-main);
-      }
-      .header-text p {
-        font-size: 11px;
-        margin: 0;
-        color: var(--text-muted);
-      }
-      .header-mark {
-        width: 36px;
-        height: 36px;
-        display: flex;
-        align-items: center;
-        justify-content: center;
-      }
-      .main {
-        flex: 1;
-      }
-      .view-pad {
-        padding: 16px;
-        display: flex;
-        flex-direction: column;
-        gap: 16px;
-      }
-      .stat-banner {
-        background: var(--card-bg);
-        border: 1px solid var(--border-color);
-        border-radius: 12px;
-        padding: 16px;
-        text-align: center;
-        display: flex;
-        flex-direction: column;
-        gap: 4px;
-        box-shadow: 0 1px 3px rgba(0,0,0,0.03);
-      }
-      .stat-banner-label {
-        font-size: 12px;
-        color: var(--text-muted);
-      }
-      .stat-banner-value {
-        font-size: 28px;
-        font-weight: 800;
-        color: var(--text-main);
-      }
-      .stat-banner-sub {
-        font-size: 11px;
-        color: var(--text-muted);
-      }
-      .summary-grid {
-        display: grid;
-        grid-template-columns: repeat(3, 1fr);
-        gap: 8px;
-      }
-      .summary-tile {
-        background: var(--card-bg);
-        border: 1px solid var(--border-color);
-        border-radius: 10px;
-        padding: 10px 8px;
-        text-align: center;
-        display: flex;
-        flex-direction: column;
-        gap: 2px;
-      }
-      .summary-label {
-        font-size: 10px;
-        color: var(--text-muted);
-      }
-      .summary-value {
-        font-size: 14px;
-        font-weight: 700;
-      }
-      .accent-gold .summary-value { color: #8C7000; }
-      .accent-indigo .summary-value { color: #005A8C; }
-      .accent-plum .summary-value { color: #A85A85; }
-
-      .card-list {
-        display: flex;
-        flex-direction: column;
-        gap: 10px;
-      }
-      .event-card, .product-card {
-        background: var(--card-bg);
-        border: 1px solid var(--border-color);
-        border-radius: 12px;
-        padding: 14px;
-        display: flex;
-        align-items: center;
-        gap: 12px;
-        cursor: pointer;
-        box-shadow: 0 1px 3px rgba(0,0,0,0.03);
-        transition: transform 0.05s ease;
-      }
-      .event-card:active, .product-card:active {
-        transform: scale(0.98);
-      }
-      .event-card-main, .product-card-main {
-        flex: 1;
-        min-width: 0;
-      }
-      .event-card-main h3, .product-card-main h3 {
-        font-size: 15px;
-        margin: 0 0 4px 0;
-        font-weight: 700;
-        white-space: nowrap;
-        overflow: hidden;
-        text-overflow: ellipsis;
-      }
-      .muted {
-        font-size: 12px;
-        color: var(--text-muted);
-        margin: 0;
-      }
-      .event-card-stats, .product-card-stats {
-        font-size: 11px;
-        color: var(--text-muted);
-        display: flex;
-        gap: 12px;
-        margin-top: 6px;
-      }
-      .event-card-side, .product-card-side {
-        display: flex;
-        flex-direction: column;
-        align-items: flex-end;
-        gap: 6px;
-      }
-      .event-revenue {
-        font-size: 14px;
-        font-weight: 700;
-        color: var(--text-main);
-      }
-      .event-revenue.small {
-        font-size: 13px;
-      }
-      .progress-track {
-        width: 100%;
-        height: 6px;
-        background: #E8DFD0;
-        border-radius: 3px;
-        overflow: hidden;
-        margin-top: 6px;
-      }
-      .progress-fill {
-        height: 100%;
-        border-radius: 3px;
-      }
-      .fab {
-        position: fixed;
-        bottom: 20px;
-        left: 50%;
-        transform: translateX(-50%);
-        background: #3A352F;
-        color: #FDF5E6;
-        border: none;
-        border-radius: 28px;
-        padding: 12px 24px;
-        font-size: 14px;
-        font-weight: 700;
-        display: flex;
-        align-items: center;
-        gap: 8px;
-        box-shadow: 0 4px 12px rgba(0,0,0,0.15);
-        cursor: pointer;
-        z-index: 9;
-      }
-      .fab:active {
-        transform: translateX(-50%) scale(0.96);
-      }
-      .product-hero {
-        background: var(--card-bg);
-        border: 1px solid var(--border-color);
-        border-radius: 12px;
-        padding: 16px;
-        display: flex;
-        align-items: center;
-        gap: 16px;
-      }
-      .product-hero-text h2 {
-        font-size: 17px;
-        margin: 0 0 4px 0;
-      }
-      .grid-card, .calc-card {
-        background: var(--card-bg);
-        border: 1px solid var(--border-color);
-        border-radius: 12px;
-        padding: 16px;
-        display: flex;
-        flex-direction: column;
-        gap: 12px;
-      }
-      .grid-card-head {
-        display: flex;
-        flex-direction: column;
-        gap: 4px;
-      }
-      .section-title {
-        font-size: 13px;
-        font-weight: 700;
-        color: var(--text-main);
-        margin: 0;
-      }
-      .grid-legend {
-        font-size: 11px;
-        color: var(--text-muted);
-      }
-      .cell-grid {
-        display: grid;
-        grid-template-columns: repeat(6, 1fr);
-        gap: 6px;
-      }
-      @media (max-width: 360px) {
-        .cell-grid { grid-template-columns: repeat(5, 1fr); }
-      }
-      .cell-btn {
-        aspect-ratio: 1;
-        background: #F8F2E4;
-        border: 1.5px dashed #C8B89D;
-        border-radius: 8px;
-        padding: 4px;
-        display: flex;
-        align-items: center;
-        justify-content: center;
-        cursor: pointer;
-        transition: transform 0.05s;
-      }
-      .cell-btn:active {
-        transform: scale(0.92);
-      }
-      .cell-btn.cell-filled {
-        background: #FFF9ED;
-        border: 1.5px solid transparent;
-      }
-      .calc-row {
-        display: flex;
-        align-items: center;
-        justify-content: space-between;
-      }
-      .calc-label {
-        font-size: 13px;
-        color: var(--text-muted);
-      }
-      .stepper {
-        display: flex;
-        align-items: center;
-        background: #F5EAD6;
-        border-radius: 8px;
-        overflow: hidden;
-        border: 1px solid var(--border-color);
-      }
-      .stepper-btn {
-        background: none;
-        border: none;
-        padding: 6px 14px;
-        font-size: 16px;
-        font-weight: 700;
-        color: var(--text-main);
-        cursor: pointer;
-      }
-      .stepper-btn:active {
-        background: #E8D8BC;
-      }
-      .stepper-value {
-        padding: 0 8px;
-        font-size: 14px;
-        font-weight: 700;
-        min-width: 32px;
-        text-align: center;
-      }
-      .calc-subtotal {
-        font-size: 16px;
-        font-weight: 700;
-      }
-      .calc-input-row {
-        background: #F8F2E4;
-        padding: 8px 12px;
-        border-radius: 8px;
-        border: 1px solid var(--border-color);
-      }
-      .calc-input {
-        background: #FFF;
-        border: 1px solid var(--border-color);
-        border-radius: 6px;
-        padding: 6px 10px;
-        font-size: 16px;
-        width: 120px;
-        text-align: right;
-        color: var(--text-main);
-        outline: none;
-      }
-      .change-display {
-        background: #F5EAD6;
-        border-radius: 8px;
-        padding: 10px 14px;
-        display: flex;
-        align-items: center;
-        justify-content: space-between;
-        border: 1px solid var(--border-color);
-      }
-      .change-display-label {
-        font-size: 13px;
-        display: flex;
-        align-items: center;
-        gap: 6px;
-        color: var(--text-muted);
-      }
-      .change-display strong {
-        font-size: 18px;
-        color: var(--text-main);
-      }
-      .change-warn {
-        background: #FCE8E6;
-        border-color: #E2A7A0;
-      }
-      .change-warn .change-display-label, .change-warn strong {
-        color: var(--danger);
-      }
-      .primary-btn {
-        background: #3A352F;
-        color: #FDF5E6;
-        border: none;
-        border-radius: 8px;
-        padding: 12px;
-        font-size: 14px;
-        font-weight: 700;
-        width: 100%;
-        cursor: pointer;
-        text-align: center;
-      }
-      .primary-btn:active {
-        opacity: 0.9;
-      }
-      .primary-btn:disabled {
-        opacity: 0.4;
-        cursor: not-allowed;
-      }
-      .danger-bg {
-        background: var(--danger) !important;
-      }
-      .danger-zone {
-        display: flex;
-        flex-direction: column;
-        gap: 8px;
-        margin-top: 8px;
-      }
-      .ghost-btn {
-        background: none;
-        border: 1px dashed var(--border-color);
-        border-radius: 8px;
-        padding: 10px;
-        font-size: 13px;
-        color: var(--text-muted);
-        cursor: pointer;
-        width: 100%;
-        display: flex;
-        align-items: center;
-        justify-content: center;
-        gap: 6px;
-      }
-      .ghost-btn:active {
-        background: #EFE6D5;
-      }
-      .danger-text {
-        color: var(--danger);
-        border-color: #E2A7A0;
-      }
-      .icon-btn {
-        background: none;
-        border: none;
-        padding: 6px;
-        cursor: pointer;
-        color: var(--text-main);
-        display: flex;
-        align-items: center;
-        justify-content: center;
-        border-radius: 6px;
-      }
-      .icon-btn:active {
-        background: #E8DFD0;
-      }
-      .icon-btn.danger {
-        color: var(--danger);
-      }
-      .modal-overlay {
-        position: fixed;
-        top: 0; left: 0; right: 0; bottom: 0;
-        background: rgba(0,0,0,0.4);
-        z-index: 100;
-        display: flex;
-        align-items: flex-end;
-        justify-content: center;
-      }
-      .modal-sheet {
-        background: var(--card-bg);
-        width: 100%;
-        max-width: 480px;
-        border-top-left-radius: 16px;
-        border-top-right-radius: 16px;
-        padding: 20px 16px 32px 16px;
-        max-height: 90vh;
-        overflow-y: auto;
-        display: flex;
-        flex-direction: column;
-        gap: 16px;
-        box-shadow: 0 -4px 20px rgba(0,0,0,0.15);
-      }
-      .modal-head {
-        display: flex;
-        align-items: center;
-        justify-content: space-between;
-      }
-      .modal-head h2 {
-        font-size: 16px;
-        margin: 0;
-      }
-      .modal-body {
-        display: flex;
-        flex-direction: column;
-        gap: 14px;
-      }
-      .field {
-        display: flex;
-        flex-direction: column;
-        gap: 6px;
-      }
-      .field span {
-        font-size: 12px;
-        font-weight: 700;
-        color: var(--text-muted);
-      }
-      .field-input {
-        background: #FFF;
-        border: 1px solid var(--border-color);
-        border-radius: 8px;
-        padding: 10px 12px;
-        font-size: 15px;
-        color: var(--text-main);
-        outline: none;
-        width: 100%;
-      }
-      .field-row {
-        display: grid;
-        grid-template-columns: 1fr 1fr;
-        gap: 10px;
-      }
-      .preview-box {
-        background: #F8F2E4;
-        border: 1px solid var(--border-color);
-        border-radius: 10px;
-        padding: 12px;
-        display: flex;
-        align-items: center;
-        gap: 12px;
-      }
-      .preview-box-text {
-        display: flex;
-        flex-direction: column;
-        gap: 2px;
-      }
-      .preview-box-text strong {
-        font-size: 14px;
-      }
-      .preview-box-text span {
-        font-size: 11px;
-        color: var(--text-muted);
-      }
-      .field-label-sub {
-        font-size: 11px !important;
-        color: var(--text-muted);
-      }
-      .chips-row {
-        display: flex;
-        gap: 6px;
-        flex-wrap: wrap;
-      }
-      .chip {
-        background: #F5EAD6;
-        border: 1px solid var(--border-color);
-        border-radius: 6px;
-        padding: 6px 12px;
-        font-size: 12px;
-        font-weight: 700;
-        color: var(--text-muted);
-        cursor: pointer;
-      }
-      .chip.active {
-        background: #3A352F;
-        color: #FDF5E6;
-        border-color: #3A352F;
-      }
-      .color-grid {
-        display: grid;
-        grid-template-columns: repeat(8, 1fr);
-        gap: 6px;
-      }
-      .color-chip {
-        aspect-ratio: 1;
-        border-radius: 6px;
-        border: 2px solid transparent;
-        cursor: pointer;
-      }
-      .color-chip.active {
-        border-color: #3A352F;
-        transform: scale(1.1);
-      }
-      .modal-actions {
-        margin-top: 4px;
-      }
-      .modal-actions-split {
-        display: grid;
-        grid-template-columns: 1fr 1fr;
-        gap: 10px;
-        margin-top: 4px;
-      }
-    `}</style>
-  );
-}
+  ReactDOM.render(React.createElement(App), document.getElementById("root"));
+});
 </script>
 </body>
 </html>
